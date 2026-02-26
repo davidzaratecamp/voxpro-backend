@@ -1,0 +1,14 @@
+node_modules/
+
+# Variables de entorno (nunca commitear)
+.env
+.env.local
+.env.*.local
+
+# Logs (mantener carpeta via .gitkeep, ignorar todo lo demás)
+logs/*
+!logs/.gitkeep
+*.log
+
+# Mac
+.DS_Store
