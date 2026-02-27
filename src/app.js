@@ -11,6 +11,9 @@ const errorHandler = require('./middleware/errorHandler');
 
 const app = express();
 
+// Confiar en el proxy de nginx (necesario para express-rate-limit con X-Forwarded-For)
+app.set('trust proxy', 1);
+
 // CORS restringido
 app.use(cors({
   origin: config.cors.origin,
