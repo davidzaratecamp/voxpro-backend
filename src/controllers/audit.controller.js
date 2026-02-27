@@ -90,7 +90,7 @@ exports.agentsPerformance = asyncHandler(async (req, res) => {
 });
 
 exports.analyze = asyncHandler(async (req, res) => {
-  const result = await AnalysisService.analyzeSelection(req.params.id);
+  const result = await AnalysisService.analyzeSelection(req.params.id, req.user.id);
   res.json({ message: 'Análisis completado', data: result });
 });
 

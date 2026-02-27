@@ -5,30 +5,29 @@ const logger = require('../utils/logger');
 
 class AnalysisService {
   constructor() {
-    // Semáforo: solo un análisis Gemini a la vez para evitar 429 por concurrencia.
+    // Semáforo por usuario: cada auditor puede tener un análisis activo,
+    // pero el mismo usuario no puede lanzar dos al mismo tiempo.
     // Se auto-libera tras 7 minutos por si el proceso muere sin liberar el lock.
-    this._busy = false;
-    this._busySince = null;
+    this._locks = new Map(); // userId -> busySince (timestamp)
     this._LOCK_TIMEOUT_MS = 7 * 60 * 1000;
   }
 
-  _acquireLock() {
-    if (this._busy && this._busySince) {
-      const elapsed = Date.now() - this._busySince;
+  _acquireLock(userId) {
+    const busySince = this._locks.get(userId);
+    if (busySince) {
+      const elapsed = Date.now() - busySince;
       if (elapsed > this._LOCK_TIMEOUT_MS) {
-        logger.warn(`Semáforo de análisis auto-liberado por timeout (${Math.round(elapsed / 1000)}s)`);
-        this._busy = false;
+        logger.warn(`Semáforo auto-liberado para usuario ${userId} (${Math.round(elapsed / 1000)}s)`);
+        this._locks.delete(userId);
       }
     }
-    if (this._busy) return false;
-    this._busy = true;
-    this._busySince = Date.now();
+    if (this._locks.has(userId)) return false;
+    this._locks.set(userId, Date.now());
     return true;
   }
 
-  _releaseLock() {
-    this._busy = false;
-    this._busySince = null;
+  _releaseLock(userId) {
+    this._locks.delete(userId);
   }
 
   /**
@@ -36,16 +35,16 @@ class AnalysisService {
    * @param {number} selectionId - ID de la audit_selection
    * @returns {object} Resultados de la evaluación
    */
-  async analyzeSelection(selectionId) {
-    if (!this._acquireLock()) {
-      const err = new Error('Hay un análisis en curso. Espere a que termine antes de iniciar otro.');
+  async analyzeSelection(selectionId, userId) {
+    if (!this._acquireLock(userId)) {
+      const err = new Error('Ya tienes un análisis en curso. Espere a que termine antes de iniciar otro.');
       err.statusCode = 409;
       throw err;
     }
     try {
       return await this._doAnalyze(selectionId);
     } finally {
-      this._releaseLock();
+      this._releaseLock(userId);
     }
   }
 
