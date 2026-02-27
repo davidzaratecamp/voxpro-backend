@@ -52,9 +52,11 @@ class GeminiService {
    * Para 429 (rate limit) usa delays largos: 30s, 60s, 120s.
    * Para otros errores transitorios usa delays cortos: 2s, 4s, 8s.
    */
-  async _retryWithBackoff(fn, maxRetries = 3) {
+  async _retryWithBackoff(fn, maxRetries = 5) {
     const RETRIABLE_CODES = [429, 500, 503];
     const RETRIABLE_ERRORS = ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND'];
+    // Delays fijos para rate limit: 15s, 30s, 45s, 60s, 90s
+    const RATE_LIMIT_DELAYS = [15000, 30000, 45000, 60000, 90000];
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {
@@ -72,10 +74,10 @@ class GeminiService {
           throw err;
         }
 
-        // Rate limit: esperar mucho más (30s, 60s, 120s)
+        // Rate limit: delays fijos (15s, 30s, 45s, 60s, 90s)
         // Otros errores: backoff corto (2s, 4s, 8s)
         const delay = isRateLimit
-          ? Math.pow(2, attempt) * 30000
+          ? RATE_LIMIT_DELAYS[attempt] ?? 90000
           : Math.pow(2, attempt + 1) * 1000;
 
         logger.warn(
