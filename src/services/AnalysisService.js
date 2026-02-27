@@ -1,14 +1,7 @@
-const { execFile } = require('child_process');
-const { promisify } = require('util');
-const os = require('os');
-const fs = require('fs');
-const path = require('path');
 const db = require('../database/connection');
 const SFTPService = require('./SFTPService');
 const GeminiService = require('./GeminiService');
 const logger = require('../utils/logger');
-
-const execFileAsync = promisify(execFile);
 
 class AnalysisService {
   /**
@@ -46,32 +39,10 @@ class AnalysisService {
       await sftp.disconnect();
     }
 
-    // 2b. Convertir a PCM WAV 16kHz mono (formato óptimo para Gemini)
-    const uid = `${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    const tmpIn = path.join(os.tmpdir(), `vxpro_${uid}_in`);
-    const tmpOut = path.join(os.tmpdir(), `vxpro_${uid}_out.wav`);
-    let wavBuffer;
-    const tConv = Date.now();
-    try {
-      fs.writeFileSync(tmpIn, audioBuffer);
-      await execFileAsync('ffmpeg', [
-        '-y', '-i', tmpIn,
-        '-acodec', 'pcm_s16le',
-        '-ar', '16000',
-        '-ac', '1',
-        tmpOut,
-      ]);
-      wavBuffer = fs.readFileSync(tmpOut);
-      logger.info(`Conversión a WAV: ${(wavBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - tConv}ms`);
-    } finally {
-      try { fs.unlinkSync(tmpIn); } catch {}
-      try { fs.unlinkSync(tmpOut); } catch {}
-    }
-
     // 3. Enviar a Gemini para transcripción + evaluación
     const tGemini = Date.now();
     const { transcription, evaluation } = await GeminiService.analyzeCall(
-      wavBuffer,
+      audioBuffer,
       selection.client_code,
       selection.agent_id,
       selection.proyecto_id

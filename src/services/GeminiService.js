@@ -29,8 +29,8 @@ class GeminiService {
 
     logger.info(`Enviando audio a Gemini (${(audioBuffer.length / 1024).toFixed(0)} KB) para ${criteria.label}`);
 
-    const result = await this._retryWithBackoff(() =>
-      this.model.generateContent([
+    return await this._retryWithBackoff(async () => {
+      const result = await this.model.generateContent([
         {
           inlineData: {
             mimeType: 'audio/wav',
@@ -38,13 +38,11 @@ class GeminiService {
           },
         },
         { text: prompt },
-      ])
-    );
-
-    const response = result.response.text();
-    logger.debug('Respuesta Gemini recibida', { length: response.length });
-
-    return this._parseResponse(response, criteria);
+      ]);
+      const response = result.response.text();
+      logger.debug('Respuesta Gemini recibida', { length: response.length });
+      return this._parseResponse(response, criteria);
+    });
   }
 
   /**
@@ -64,18 +62,21 @@ class GeminiService {
       } catch (err) {
         const status = err.status || err.httpStatusCode || err.code;
         const isRateLimit = status === 429 || err.message?.includes('429') || err.message?.includes('Resource exhausted');
+        const isJsonError = err.message?.includes('JSON') || err.message?.includes('no es JSON válido');
         const isRetriable =
           RETRIABLE_CODES.includes(status) ||
           RETRIABLE_ERRORS.includes(err.code) ||
           err.message?.includes('timeout') ||
-          isRateLimit;
+          isRateLimit ||
+          isJsonError;
 
         if (!isRetriable || attempt === maxRetries) {
           throw err;
         }
 
         // Rate limit: delays fijos (15s, 30s, 45s, 60s, 90s)
-        // Otros errores: backoff corto (2s, 4s, 8s)
+        // JSON truncado/inválido: backoff corto (2s, 4s, 8s) — puede ser problema de red
+        // Otros errores transitorios: backoff corto (2s, 4s, 8s)
         const delay = isRateLimit
           ? RATE_LIMIT_DELAYS[attempt] ?? 90000
           : Math.pow(2, attempt + 1) * 1000;
