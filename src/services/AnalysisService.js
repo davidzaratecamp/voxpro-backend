@@ -4,51 +4,12 @@ const GeminiService = require('./GeminiService');
 const logger = require('../utils/logger');
 
 class AnalysisService {
-  constructor() {
-    // Semáforo por usuario: cada auditor puede tener un análisis activo,
-    // pero el mismo usuario no puede lanzar dos al mismo tiempo.
-    // Se auto-libera tras 7 minutos por si el proceso muere sin liberar el lock.
-    this._locks = new Map(); // userId -> busySince (timestamp)
-    this._LOCK_TIMEOUT_MS = 7 * 60 * 1000;
-  }
-
-  _acquireLock(userId) {
-    const busySince = this._locks.get(userId);
-    if (busySince) {
-      const elapsed = Date.now() - busySince;
-      if (elapsed > this._LOCK_TIMEOUT_MS) {
-        logger.warn(`Semáforo auto-liberado para usuario ${userId} (${Math.round(elapsed / 1000)}s)`);
-        this._locks.delete(userId);
-      }
-    }
-    if (this._locks.has(userId)) return false;
-    this._locks.set(userId, Date.now());
-    return true;
-  }
-
-  _releaseLock(userId) {
-    this._locks.delete(userId);
-  }
-
   /**
    * Analiza una auditoría: descarga audio, transcribe con Gemini, evalúa, guarda resultados.
    * @param {number} selectionId - ID de la audit_selection
    * @returns {object} Resultados de la evaluación
    */
-  async analyzeSelection(selectionId, userId) {
-    if (!this._acquireLock(userId)) {
-      const err = new Error('Ya tienes un análisis en curso. Espere a que termine antes de iniciar otro.');
-      err.statusCode = 409;
-      throw err;
-    }
-    try {
-      return await this._doAnalyze(selectionId);
-    } finally {
-      this._releaseLock(userId);
-    }
-  }
-
-  async _doAnalyze(selectionId) {
+  async analyzeSelection(selectionId) {
     // 1. Obtener datos de la selección + grabación
     const selection = await db('audit_selections as a')
       .join('recordings as r', 'a.recording_id', 'r.id')
