@@ -1,4 +1,8 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const { GoogleAIFileManager } = require('@google/generative-ai/server');
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
 const config = require('../config');
 const logger = require('../utils/logger');
 const { getCriteria } = require('../config/evaluationCriteria');
@@ -7,6 +11,7 @@ class GeminiService {
   constructor() {
     this.genAI = new GoogleGenerativeAI(config.gemini.apiKey);
     this.model = this.genAI.getGenerativeModel({ model: config.gemini.model });
+    this.fileManager = new GoogleAIFileManager(config.gemini.apiKey);
   }
 
   /**
@@ -24,25 +29,37 @@ class GeminiService {
     }
 
     const prompt = this._buildPrompt(criteria);
+    const sizeKB = (audioBuffer.length / 1024).toFixed(0);
+    logger.info(`Subiendo audio a Gemini File API (${sizeKB} KB) para ${criteria.label}`);
 
-    const audioBase64 = audioBuffer.toString('base64');
+    // Subir el audio como archivo (evita las restricciones de inlineData en producción)
+    const tmpPath = path.join(os.tmpdir(), `vxpro_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.wav`);
+    let uploadedFileName = null;
+    try {
+      fs.writeFileSync(tmpPath, audioBuffer);
+      const uploadResponse = await this.fileManager.uploadFile(tmpPath, {
+        mimeType: 'audio/wav',
+        displayName: `voxpro_audio_${Date.now()}`,
+      });
+      uploadedFileName = uploadResponse.file.name;
+      const fileUri = uploadResponse.file.uri;
+      logger.info(`Audio subido: ${uploadedFileName}`);
 
-    logger.info(`Enviando audio a Gemini (${(audioBuffer.length / 1024).toFixed(0)} KB) para ${criteria.label}`);
-
-    return await this._retryWithBackoff(async () => {
-      const result = await this.model.generateContent([
-        {
-          inlineData: {
-            mimeType: 'audio/wav',
-            data: audioBase64,
-          },
-        },
-        { text: prompt },
-      ]);
-      const response = result.response.text();
-      logger.debug('Respuesta Gemini recibida', { length: response.length });
-      return this._parseResponse(response, criteria);
-    });
+      return await this._retryWithBackoff(async () => {
+        const result = await this.model.generateContent([
+          { fileData: { mimeType: 'audio/wav', fileUri } },
+          { text: prompt },
+        ]);
+        const response = result.response.text();
+        logger.debug('Respuesta Gemini recibida', { length: response.length });
+        return this._parseResponse(response, criteria);
+      });
+    } finally {
+      try { fs.unlinkSync(tmpPath); } catch {}
+      if (uploadedFileName) {
+        this.fileManager.deleteFile(uploadedFileName).catch(() => {});
+      }
+    }
   }
 
   /**
