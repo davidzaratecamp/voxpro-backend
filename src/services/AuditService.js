@@ -1,8 +1,11 @@
 const db = require('../database/connection');
 const { LV_PROYECTO_IDS, LV_CUSTOMER_PROYECTO, OBAMA_CUSTOMER_AGENTS } = require('../config/evaluationCriteria');
 
-// Duración mínima en segundos para seleccionar llamadas LV
+// Duración mínima en segundos para seleccionar llamadas
 const LV_MIN_DURATION = 60;
+
+// Máximo de selecciones por agente por semana (por auditor)
+const MAX_PER_AGENT = 2;
 
 class AuditService {
   /**
@@ -36,31 +39,23 @@ class AuditService {
 
   /**
    * Selecciona llamadas del día anterior para auditoría diaria.
-   * Distribuye proporcionalmente por cliente según su cantidad de agentes.
-   * Se ejecuta cada mañana (lun-sáb).
-   *
-   * Algoritmo:
-   * 1. Determinar fecha objetivo (default: ayer) y semana
-   * 2. Contar agentes totales por cliente (de toda la semana)
-   * 3. Calcular cuota diaria por cliente = (agentes_cliente / agentes_total) / días_restantes
-   * 4. Obtener grabaciones del día, excluyendo agentes ya seleccionados
-   * 5. Por cada cliente, elegir hasta su cuota diaria de agentes con grabación "media"
-   * 6. Insertar en audit_selections
+   * Cada auditor tiene su propia cuota independiente (MAX_PER_AGENT por agente/semana).
+   * El UNIQUE(recording_id) en la DB evita que dos auditores seleccionen la misma grabación.
    *
    * @param {string|null} targetDate - Fecha a auditar (YYYY-MM-DD). Default: ayer.
+   * @param {number} userId - ID del auditor que ejecuta el scan.
    * @returns {object} Resumen de la selección
    */
-  async selectForDay(targetDate = null) {
+  async selectForDay(targetDate = null, userId) {
     const date = targetDate || this._previousWorkDay();
     const { monday, sunday } = this._getWeekBounds(date);
 
     // Días laborales restantes en la semana (lun=1 a sáb=6)
-    const targetDay = new Date(date).getUTCDay(); // 0=dom...6=sáb
-    const workDayIndex = targetDay === 0 ? 6 : targetDay; // lun=1..sáb=6
-    const remainingDays = 7 - workDayIndex; // incluyendo hoy
+    const targetDay = new Date(date).getUTCDay();
+    const workDayIndex = targetDay === 0 ? 6 : targetDay;
+    const remainingDays = 7 - workDayIndex;
 
     // Agentes totales por cliente (toda la semana, para calcular proporciones)
-    // Se hace en JS para poder reclasificar LV (proyecto_id 34,35) desde obama
     const weekAgents = await db('recordings as r')
       .join('aware_sources as s', 'r.aware_source_id', 's.id')
       .join('clients as c', 's.client_id', 'c.id')
@@ -71,7 +66,7 @@ class AuditService {
       .select('c.code as client_code', 'r.agent_id', 'r.proyecto_id');
 
     // Reclasificar LV y contar agentes únicos por cliente
-    const agentsByClient = new Map(); // client_code → Set(agent_id)
+    const agentsByClient = new Map();
     for (const row of weekAgents) {
       let code = row.client_code;
       if (code === 'obama' && row.proyecto_id && LV_PROYECTO_IDS.has(row.proyecto_id)) {
@@ -87,28 +82,36 @@ class AuditService {
 
     const totalAgents = agentCounts.reduce((sum, r) => sum + r.total_agents, 0);
 
-    // Agentes ya seleccionados esta semana, por cliente
+    // Selecciones ya hechas ESTA SEMANA por ESTE auditor
     const alreadySelected = await db('audit_selections as a')
       .leftJoin('recordings as sel_r', 'a.recording_id', 'sel_r.id')
       .where('a.week_start', monday)
+      .where('a.auditor_id', userId)
       .select('a.agent_id', 'a.client_code', 'a.recording_id', 'sel_r.proyecto_id');
-    const selectedSet = new Set(alreadySelected.map((r) => r.agent_id));
-    const selectedByClient = new Map();
+
+    // Contar selecciones por (agent_id, client_code) para respetar MAX_PER_AGENT
+    const selectedCountByAgent = new Map(); // key: `${agent_id}::${client_code}` → count
+    const selectedRecordingIds = new Set(); // grabaciones ya seleccionadas por este auditor
+    const selectedByClient = new Map();    // client_code → total count
+
     for (const row of alreadySelected) {
+      const key = `${row.agent_id}::${row.client_code}`;
+      selectedCountByAgent.set(key, (selectedCountByAgent.get(key) || 0) + 1);
       selectedByClient.set(row.client_code, (selectedByClient.get(row.client_code) || 0) + 1);
+      if (row.recording_id) selectedRecordingIds.add(String(row.recording_id));
     }
 
-    // Para LV: recording_ids ya seleccionados (evitar duplicados)
+    // Para LV: recording_ids ya seleccionados hoy por este auditor
     const lvSelectedToday = new Set();
     for (const row of alreadySelected) {
-      if (row.client_code === 'lv') {
+      if (row.client_code === 'lv' && row.recording_id) {
         lvSelectedToday.add(String(row.recording_id));
       }
     }
 
     // Calcular cuota diaria por cliente
-    // cuota = (agentes_cliente - ya_seleccionados_cliente) / días_restantes, redondeado arriba
-    // LV no tiene cuota — se auditan todos los agentes todos los días
+    // cuota = ceil((MAX_PER_AGENT * agentes - ya_seleccionados) / días_restantes)
+    // LV no tiene cuota — se auditan todos los elegibles
     const quotas = new Map();
     for (const row of agentCounts) {
       if (row.client_code === 'lv') {
@@ -116,13 +119,12 @@ class AuditService {
         continue;
       }
       const alreadyDone = selectedByClient.get(row.client_code) || 0;
-      const pending = row.total_agents - alreadyDone;
+      const pending = Math.max(0, MAX_PER_AGENT * row.total_agents - alreadyDone);
       const daily = Math.ceil(pending / remainingDays);
       quotas.set(row.client_code, daily);
     }
 
     // Grabaciones del día objetivo con agente válido y tamaño mínimo
-    // (archivos < 10 KB son grabaciones corruptas/vacías)
     const recordings = await db('recordings as r')
       .join('aware_sources as s', 'r.aware_source_id', 's.id')
       .join('clients as c', 's.client_id', 'c.id')
@@ -141,10 +143,8 @@ class AuditService {
       );
 
     // Separar grabaciones LV vs otros clientes
-    // LV: seleccionar TODAS las grabaciones >= LV_MIN_DURATION (60s)
-    // Otros: agrupar por agente, 1 por agente por semana
-    const lvRecordings = []; // LV: todas las que cumplan duración
-    const byClientAgent = new Map(); // otros: client_code → Map(agent_id → [recs])
+    const lvRecordings = [];
+    const byClientAgent = new Map(); // client_code → Map(agent_id → [recs])
 
     for (const rec of recordings) {
       if (rec.client_code === 'obama' && rec.proyecto_id && LV_PROYECTO_IDS.has(rec.proyecto_id)) {
@@ -152,14 +152,17 @@ class AuditService {
       }
 
       if (rec.client_code === 'lv') {
-        // LV: incluir todas las que tengan duración >= 60s y no estén ya seleccionadas hoy
         if (lvSelectedToday.has(String(rec.id))) continue;
         if (rec.call_duration != null && rec.call_duration >= LV_MIN_DURATION) {
           lvRecordings.push(rec);
         }
       } else {
-        // Otros clientes: saltar si el agente ya fue seleccionado esta semana
-        if (selectedSet.has(rec.agent_id)) continue;
+        // Saltar si este auditor ya seleccionó MAX_PER_AGENT veces a este agente esta semana
+        const agentKey = `${rec.agent_id}::${rec.client_code}`;
+        if ((selectedCountByAgent.get(agentKey) || 0) >= MAX_PER_AGENT) continue;
+        // Saltar si esta grabación ya fue seleccionada por este auditor
+        if (selectedRecordingIds.has(String(rec.id))) continue;
+
         if (!byClientAgent.has(rec.client_code)) {
           byClientAgent.set(rec.client_code, new Map());
         }
@@ -185,6 +188,7 @@ class AuditService {
             agent_id: rec.agent_id,
             agent_name: rec.agent_name,
             client_code: 'lv',
+            auditor_id: userId,
             week_start: monday,
             week_end: sunday,
             status: 'selected',
@@ -202,7 +206,7 @@ class AuditService {
       breakdown.lv = { quota: 'all', selected: lvInserted, available: lvRecordings.length };
     }
 
-    // Otros clientes: 1 grabación por agente por semana
+    // Otros clientes: hasta MAX_PER_AGENT grabaciones por agente por semana
     for (const [clientCode, agentMap] of byClientAgent) {
       const quota = quotas.get(clientCode) || 1;
       let clientInserted = 0;
@@ -219,6 +223,7 @@ class AuditService {
             agent_id: agentId,
             agent_name: chosen.agent_name,
             client_code: chosen.client_code,
+            auditor_id: userId,
             week_start: monday,
             week_end: sunday,
             status: 'selected',
@@ -240,7 +245,7 @@ class AuditService {
     return {
       inserted,
       skipped,
-      already_selected: selectedSet.size,
+      already_selected: alreadySelected.length,
       total_agents: totalAgents,
       remaining_days: remainingDays,
       date,
@@ -257,9 +262,8 @@ class AuditService {
   _previousWorkDay() {
     const now = new Date();
     const d = new Date(Date.UTC(now.getFullYear(), now.getMonth(), now.getDate()));
-    const day = d.getUTCDay(); // 0=dom, 1=lun...
+    const day = d.getUTCDay();
     if (day === 1) {
-      // Lunes: auditar el sábado
       d.setUTCDate(d.getUTCDate() - 2);
     } else {
       d.setUTCDate(d.getUTCDate() - 1);
@@ -288,7 +292,6 @@ class AuditService {
   _pickOne(recs) {
     if (!recs.length) return null;
 
-    // Filtrar por duración mínima
     const valid = recs.filter(
       (r) => r.call_duration != null && r.call_duration >= LV_MIN_DURATION
     );
@@ -296,7 +299,6 @@ class AuditService {
       return valid[Math.floor(Math.random() * valid.length)];
     }
 
-    // Fallback: si no hay duración, elegir aleatoria de las que tengan tamaño razonable
     const bySize = recs.filter((r) => r.file_size != null && r.file_size >= 10240);
     if (bySize.length) {
       return bySize[Math.floor(Math.random() * bySize.length)];
@@ -307,10 +309,12 @@ class AuditService {
 
   /**
    * Lista selecciones de una semana con datos de la grabación.
-   * @param {string|null} weekStart - Lunes (YYYY-MM-DD). Default: semana pasada.
-   * @param {{ client?: string, status?: string }} filters
+   * Filtra por auditor_id para que cada auditor solo vea sus propias selecciones.
+   *
+   * @param {string|null} weekStart - Lunes (YYYY-MM-DD). Default: semana actual.
+   * @param {{ client?: string, status?: string, clientCodes?: string[], date?: string, userId?: number }} filters
    */
-  async getWeekSelections(weekStart = null, { client, status, clientCodes, date } = {}) {
+  async getWeekSelections(weekStart = null, { client, status, clientCodes, date, userId } = {}) {
     const { monday } = this._getWeekBounds(weekStart);
 
     const query = db('audit_selections as a')
@@ -322,6 +326,7 @@ class AuditService {
         'a.agent_id',
         'a.agent_name',
         'a.client_code',
+        'a.auditor_id',
         'a.week_start',
         'a.week_end',
         'a.status',
@@ -341,13 +346,13 @@ class AuditService {
     if (clientCodes && clientCodes.length) {
       query.whereIn('a.client_code', clientCodes);
     }
+    if (userId) query.where('a.auditor_id', userId);
     if (client) query.where('a.client_code', client);
     if (status) query.where('a.status', status);
     if (date) query.where('r.file_date', date);
 
     const rows = await query;
 
-    // Agregar campaign_type (ventas/customer) para Obama y LV
     for (const row of rows) {
       row.campaign_type = this._getCampaignType(row.client_code, row.agent_id, row.proyecto_id);
     }
@@ -400,9 +405,11 @@ class AuditService {
 
   /**
    * Rendimiento agregado por agente desde audit_selections.
-   * @param {{ client?: string, clientCodes?: string[] }} filters
+   * Filtra por auditor_id para que cada auditor solo vea su propio rendimiento.
+   *
+   * @param {{ client?: string, clientCodes?: string[], userId?: number }} filters
    */
-  async agentsPerformance({ client, clientCodes } = {}) {
+  async agentsPerformance({ client, clientCodes, userId } = {}) {
     const query = db('audit_selections')
       .select(
         'agent_id',
@@ -423,6 +430,7 @@ class AuditService {
     if (clientCodes && clientCodes.length) {
       query.whereIn('client_code', clientCodes);
     }
+    if (userId) query.where('auditor_id', userId);
     if (client) query.where('client_code', client);
 
     return query;
@@ -430,11 +438,13 @@ class AuditService {
 
   /**
    * Lista todas las auditorías de un agente específico.
+   * Filtra por auditor_id para aislar las selecciones de cada auditor.
+   *
    * @param {string} agentId
    * @param {string} clientCode
-   * @param {{ clientCodes?: string[] }} opts - para validar acceso
+   * @param {{ clientCodes?: string[], userId?: number }} opts
    */
-  async getAgentAudits(agentId, clientCode, { clientCodes } = {}) {
+  async getAgentAudits(agentId, clientCode, { clientCodes, userId } = {}) {
     const query = db('audit_selections as a')
       .join('recordings as r', 'a.recording_id', 'r.id')
       .where('a.agent_id', agentId)
@@ -445,6 +455,7 @@ class AuditService {
         'a.agent_id',
         'a.agent_name',
         'a.client_code',
+        'a.auditor_id',
         'a.week_start',
         'a.week_end',
         'a.status',
@@ -461,6 +472,7 @@ class AuditService {
     if (clientCodes && clientCodes.length) {
       query.whereIn('a.client_code', clientCodes);
     }
+    if (userId) query.where('a.auditor_id', userId);
 
     const rows = await query;
 
@@ -473,8 +485,9 @@ class AuditService {
 
   /**
    * Resumen general: semanas procesadas, pendientes, completadas.
+   * Filtra por auditor_id para mostrar solo el trabajo de cada auditor.
    */
-  async summary(clientCodes = null) {
+  async summary(clientCodes = null, userId = null) {
     const weeksQuery = db('audit_selections')
       .select(
         'week_start',
@@ -492,6 +505,7 @@ class AuditService {
     if (clientCodes && clientCodes.length) {
       weeksQuery.whereIn('client_code', clientCodes);
     }
+    if (userId) weeksQuery.where('auditor_id', userId);
 
     const weeks = await weeksQuery;
 
@@ -509,6 +523,7 @@ class AuditService {
     if (clientCodes && clientCodes.length) {
       totalsQuery.whereIn('client_code', clientCodes);
     }
+    if (userId) totalsQuery.where('auditor_id', userId);
 
     const [totals] = await totalsQuery;
 

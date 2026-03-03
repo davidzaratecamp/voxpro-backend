@@ -11,21 +11,39 @@ const asyncHandler = require('../middleware/asyncHandler');
 
 const execFileAsync = promisify(execFile);
 
+/**
+ * Verifica que la selección pertenece al auditor que hace la petición
+ * y que su client_code está dentro de sus client_codes autorizados.
+ * Retorna un objeto de error listo para responder, o null si el acceso es válido.
+ */
+function checkAccess(selection, req) {
+  if (!selection) {
+    return { status: 404, body: { error: true, message: 'Selección no encontrada' } };
+  }
+  if (!req.user.client_codes.includes(selection.client_code)) {
+    return { status: 403, body: { error: true, message: 'Acceso no autorizado' } };
+  }
+  if (selection.auditor_id !== null && selection.auditor_id !== req.user.id) {
+    return { status: 403, body: { error: true, message: 'Acceso no autorizado' } };
+  }
+  return null;
+}
+
 exports.select = asyncHandler(async (req, res) => {
   const { date } = req.body;
-  const result = await AuditService.selectForDay(date || null);
+  const result = await AuditService.selectForDay(date || null, req.user.id);
   res.json({ message: 'Selección completada', data: result });
 });
 
 exports.list = asyncHandler(async (req, res) => {
   const { week_start, client, status, date, campaign } = req.query;
-  const clientCodes = req.user.client_codes;
+  const { client_codes: clientCodes, id: userId } = req.user;
+
   let selections = await AuditService.getWeekSelections(
     week_start || null,
-    { client, status, clientCodes, date }
+    { client, status, clientCodes, date, userId }
   );
 
-  // Filtrar por tipo de campaña (ventas/customer) si se especifica
   if (campaign) {
     selections = selections.filter((s) => s.campaign_type === campaign);
   }
@@ -35,9 +53,8 @@ exports.list = asyncHandler(async (req, res) => {
 
 exports.getById = asyncHandler(async (req, res) => {
   const selection = await AuditService.getById(req.params.id);
-  if (!selection) {
-    return res.status(404).json({ error: true, message: 'Selección no encontrada' });
-  }
+  const err = checkAccess(selection, req);
+  if (err) return res.status(err.status).json(err.body);
   res.json({ data: selection });
 });
 
@@ -61,6 +78,10 @@ exports.update = asyncHandler(async (req, res) => {
     });
   }
 
+  const selection = await AuditService.getById(req.params.id);
+  const err = checkAccess(selection, req);
+  if (err) return res.status(err.status).json(err.body);
+
   const updated = await AuditService.updateSelection(req.params.id, { status, score, notes });
   if (!updated) {
     return res.status(404).json({ error: true, message: 'Selección no encontrada' });
@@ -72,29 +93,37 @@ exports.update = asyncHandler(async (req, res) => {
 exports.agentAudits = asyncHandler(async (req, res) => {
   const { agentId } = req.params;
   const { client } = req.query;
-  const clientCodes = req.user.client_codes;
+  const { client_codes: clientCodes, id: userId } = req.user;
 
   if (!client) {
     return res.status(400).json({ error: true, message: 'Parámetro client requerido' });
   }
 
-  const audits = await AuditService.getAgentAudits(agentId, client, { clientCodes });
+  const audits = await AuditService.getAgentAudits(agentId, client, { clientCodes, userId });
   res.json({ data: audits, count: audits.length });
 });
 
 exports.agentsPerformance = asyncHandler(async (req, res) => {
   const { client } = req.query;
-  const clientCodes = req.user.client_codes;
-  const agents = await AuditService.agentsPerformance({ client, clientCodes });
+  const { client_codes: clientCodes, id: userId } = req.user;
+  const agents = await AuditService.agentsPerformance({ client, clientCodes, userId });
   res.json({ data: agents, count: agents.length });
 });
 
 exports.analyze = asyncHandler(async (req, res) => {
+  const selection = await AuditService.getById(req.params.id);
+  const err = checkAccess(selection, req);
+  if (err) return res.status(err.status).json(err.body);
+
   const result = await AnalysisService.analyzeSelection(req.params.id);
   res.json({ message: 'Análisis completado', data: result });
 });
 
 exports.updateAnalysis = asyncHandler(async (req, res) => {
+  const selection = await AuditService.getById(req.params.id);
+  const err = checkAccess(selection, req);
+  if (err) return res.status(err.status).json(err.body);
+
   const { criteria, score } = req.body;
   const user = { id: req.user.id, name: req.user.name };
   const result = await AnalysisService.updateEvaluation(req.params.id, { criteria, score, user });
@@ -105,6 +134,10 @@ exports.updateAnalysis = asyncHandler(async (req, res) => {
 });
 
 exports.getAnalysis = asyncHandler(async (req, res) => {
+  const selection = await AuditService.getById(req.params.id);
+  const err = checkAccess(selection, req);
+  if (err) return res.status(err.status).json(err.body);
+
   const results = await AnalysisService.getResults(req.params.id);
   if (!results) {
     return res.status(404).json({ error: true, message: 'No hay análisis para esta selección' });
@@ -116,12 +149,11 @@ exports.streamAudio = asyncHandler(async (req, res) => {
   const selection = await db('audit_selections as a')
     .join('recordings as r', 'a.recording_id', 'r.id')
     .where('a.id', req.params.id)
-    .select('r.file_path', 'r.file_name', 'r.file_size')
+    .select('r.file_path', 'r.file_name', 'r.file_size', 'a.client_code', 'a.auditor_id')
     .first();
 
-  if (!selection) {
-    return res.status(404).json({ error: true, message: 'Selección no encontrada' });
-  }
+  const err = checkAccess(selection, req);
+  if (err) return res.status(err.status).json(err.body);
 
   const sftp = new SFTPService();
   const tmpDir = os.tmpdir();
@@ -133,7 +165,6 @@ exports.streamAudio = asyncHandler(async (req, res) => {
     const audioBuffer = await sftp.getFile(selection.file_path);
     await sftp.disconnect();
 
-    // Escribir archivo temporal y convertir GSM → PCM con ffmpeg
     fs.writeFileSync(tmpInput, audioBuffer);
     await execFileAsync('ffmpeg', [
       '-y', '-i', tmpInput,
@@ -156,14 +187,13 @@ exports.streamAudio = asyncHandler(async (req, res) => {
     await sftp.disconnect().catch(() => {});
     throw err;
   } finally {
-    // Limpiar archivos temporales
     try { fs.unlinkSync(tmpInput); } catch {}
     try { fs.unlinkSync(tmpOutput); } catch {}
   }
 });
 
 exports.summary = asyncHandler(async (req, res) => {
-  const clientCodes = req.user.client_codes;
-  const result = await AuditService.summary(clientCodes);
+  const { client_codes: clientCodes, id: userId } = req.user;
+  const result = await AuditService.summary(clientCodes, userId);
   res.json({ data: result });
 });
