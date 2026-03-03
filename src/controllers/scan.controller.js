@@ -42,7 +42,7 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const selectDate = date || yesterday.toISOString().slice(0, 10);
-  const auditResult = await AuditService.selectForDay(selectDate);
+  const auditResult = await AuditService.selectForDay(selectDate, req.user.id);
 
   // 3. Limpiar grabaciones no seleccionadas para auditoría
   const cleanupResult = await ScannerService.cleanupUnselected();
