@@ -55,8 +55,14 @@ class AuditService {
     const workDayIndex = targetDay === 0 ? 6 : targetDay;
     const remainingDays = 7 - workDayIndex;
 
+    // Filtro de agentes asignados a este coordinador (null = sin restricción)
+    const userRow = await db('users').where('id', userId).select('agent_names').first();
+    const agentNames = userRow?.agent_names
+      ? (typeof userRow.agent_names === 'string' ? JSON.parse(userRow.agent_names) : userRow.agent_names)
+      : null;
+
     // Agentes totales por cliente (toda la semana, para calcular proporciones)
-    const weekAgents = await db('recordings as r')
+    const weekAgentsQuery = db('recordings as r')
       .join('aware_sources as s', 'r.aware_source_id', 's.id')
       .join('clients as c', 's.client_id', 'c.id')
       .whereNotNull('r.agent_id')
@@ -64,6 +70,10 @@ class AuditService {
       .where('r.file_date', '>=', monday)
       .where('r.file_date', '<=', sunday)
       .select('c.code as client_code', 'r.agent_id', 'r.proyecto_id');
+
+    if (agentNames) weekAgentsQuery.whereIn('r.agent_name', agentNames);
+
+    const weekAgents = await weekAgentsQuery;
 
     // Reclasificar LV y contar agentes únicos por cliente
     const agentsByClient = new Map();
@@ -125,7 +135,7 @@ class AuditService {
     }
 
     // Grabaciones del día objetivo con agente válido y tamaño mínimo
-    const recordings = await db('recordings as r')
+    const recordingsQuery = db('recordings as r')
       .join('aware_sources as s', 'r.aware_source_id', 's.id')
       .join('clients as c', 's.client_id', 'c.id')
       .whereNotNull('r.agent_id')
@@ -141,6 +151,10 @@ class AuditService {
         'r.proyecto_id',
         'c.code as client_code'
       );
+
+    if (agentNames) recordingsQuery.whereIn('r.agent_name', agentNames);
+
+    const recordings = await recordingsQuery;
 
     // Separar grabaciones LV vs otros clientes
     const lvRecordings = [];
