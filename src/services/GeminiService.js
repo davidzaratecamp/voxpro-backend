@@ -7,11 +7,46 @@ const config = require('../config');
 const logger = require('../utils/logger');
 const { getCriteria } = require('../config/evaluationCriteria');
 
+/**
+ * Semáforo de concurrencia: permite hasta MAX_CONCURRENT análisis simultáneos a Gemini.
+ * Los demás esperan en cola en lugar de fallar con 429.
+ * Cada slot "pasa" directamente al siguiente en espera cuando se libera.
+ */
+class Semaphore {
+  constructor(max) {
+    this.max = max;
+    this.running = 0;
+    this.queue = [];
+  }
+
+  async acquire() {
+    if (this.running < this.max) {
+      this.running++;
+      return;
+    }
+    logger.info(`Gemini queue: ${this.queue.length + 1} esperando slot (${this.running}/${this.max} en uso)`);
+    await new Promise((resolve) => this.queue.push(resolve));
+  }
+
+  release() {
+    if (this.queue.length > 0) {
+      // Pasa el slot directamente al siguiente en espera (running no cambia)
+      const next = this.queue.shift();
+      next();
+    } else {
+      this.running--;
+    }
+  }
+}
+
+const MAX_CONCURRENT = 3;
+
 class GeminiService {
   constructor() {
     this.genAI = new GoogleGenerativeAI(config.gemini.apiKey);
     this.model = this.genAI.getGenerativeModel({ model: config.gemini.model });
     this.fileManager = new GoogleAIFileManager(config.gemini.apiKey);
+    this.semaphore = new Semaphore(MAX_CONCURRENT);
   }
 
   /**
@@ -28,6 +63,15 @@ class GeminiService {
       throw new Error(`No hay criterios de evaluación para el cliente: ${clientCode}`);
     }
 
+    await this.semaphore.acquire();
+    try {
+      return await this._doAnalyzeCall(audioBuffer, criteria);
+    } finally {
+      this.semaphore.release();
+    }
+  }
+
+  async _doAnalyzeCall(audioBuffer, criteria) {
     const prompt = this._buildPrompt(criteria);
     const sizeKB = (audioBuffer.length / 1024).toFixed(0);
     logger.info(`Subiendo audio a Gemini File API (${sizeKB} KB) para ${criteria.label}`);
