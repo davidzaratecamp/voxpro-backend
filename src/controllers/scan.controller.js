@@ -2,6 +2,8 @@ const ScannerService = require('../services/ScannerService');
 const AuditService = require('../services/AuditService');
 const asyncHandler = require('../middleware/asyncHandler');
 const db = require('../database/connection');
+const AwareDBService = require('../services/AwareDBService');
+const AWARE_SOURCES = require('../config/sources');
 
 exports.triggerScan = asyncHandler(async (req, res) => {
   const { date, full_scan } = req.body;
@@ -102,6 +104,27 @@ exports.diagnose = asyncHandler(async (req, res) => {
     .select('r.agent_id', 'r.agent_name', db.raw('COUNT(*) as recordings'))
     .orderBy('recordings', 'desc');
 
+  // Estado de enriquecimiento para grabaciones sin agent_id en AWARE_8
+  const [enrichStatus] = await db('recordings as r')
+    .join('aware_sources as s', 'r.aware_source_id', 's.id')
+    .where('r.file_date', date)
+    .where('s.folder_name', 'AWARE_8')
+    .whereNull('r.agent_id')
+    .select(
+      db.raw('SUM(CASE WHEN r.agent_enriched = 0 AND r.call_id IS NOT NULL THEN 1 ELSE 0 END) as pending_enrich'),
+      db.raw('SUM(CASE WHEN r.agent_enriched = 0 AND r.call_id IS NULL THEN 1 ELSE 0 END) as no_call_id'),
+      db.raw('SUM(CASE WHEN r.agent_enriched = 1 THEN 1 ELSE 0 END) as enriched_but_no_agent')
+    );
+
+  // Consulta directa a AwareDB para ver si los agentes del coordinador tienen llamadas ese día
+  let awareDbResult = null;
+  if (agentIds && agentIds.length) {
+    const tytSource = AWARE_SOURCES.find((s) => s.folder === 'AWARE_8');
+    if (tytSource) {
+      awareDbResult = await AwareDBService.checkAgentsOnDate(tytSource, agentIds, date);
+    }
+  }
+
   res.json({
     date,
     user: userRow?.name,
@@ -109,5 +132,7 @@ exports.diagnose = asyncHandler(async (req, res) => {
     recordings_by_source: bySource,
     my_agents_on_date: { count: myAgentsCount, detail: myAgentsDetail },
     all_agents_in_aware8: presentAgents,
+    aware8_null_agent_breakdown: enrichStatus,
+    awaredb_direct_check: awareDbResult,
   });
 });

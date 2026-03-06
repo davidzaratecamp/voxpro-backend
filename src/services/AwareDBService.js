@@ -247,6 +247,61 @@ class AwareDBService {
     }
   }
 
+  /**
+   * Verifica cuántas llamadas tienen un agente_id dado en registro_llamada para una fecha.
+   * Útil para diagnosticar si los agentes de un coordinador existen en AwareDB.
+   *
+   * @param {object} sourceConfig - Config de la fuente (de sources.js)
+   * @param {string[]} agentIds   - Lista de cédulas a buscar
+   * @param {string} date         - Fecha YYYY-MM-DD
+   * @returns {Array} [{agent_id, agent_name, call_count}]
+   */
+  async checkAgentsOnDate(sourceConfig, agentIds, date) {
+    if (!agentIds.length) return [];
+
+    let pgClient;
+    let sshClient;
+    let localServer;
+
+    try {
+      const tunnel = await this._openTunnel(sourceConfig.db);
+      sshClient = tunnel.sshClient;
+      localServer = tunnel.localServer;
+
+      pgClient = new PGClient({
+        host: '127.0.0.1',
+        port: tunnel.localPort,
+        database: sourceConfig.db.database,
+        user: sourceConfig.db.user,
+        password: sourceConfig.db.password,
+        statement_timeout: 30000,
+      });
+
+      await pgClient.connect();
+
+      const query = `
+        SELECT rl.agente_id::text AS agent_id,
+               MAX(e.empleado_name) AS agent_name,
+               COUNT(*) AS call_count
+        FROM registro_llamada rl
+        LEFT JOIN empleado e ON rl.agente_id = e.empleado_rut
+        WHERE rl.agente_id::text = ANY($1::text[])
+          AND rl.registro_llamada_fecha = $2::date
+        GROUP BY rl.agente_id
+        ORDER BY call_count DESC
+      `;
+      const result = await pgClient.query(query, [agentIds, date]);
+      return result.rows;
+    } catch (err) {
+      logger.error(`AwareDB checkAgentsOnDate ${sourceConfig.folder}: error`, err);
+      return [];
+    } finally {
+      if (pgClient) await pgClient.end().catch(() => {});
+      if (localServer) localServer.close();
+      if (sshClient) sshClient.end();
+    }
+  }
+
   _formatAgent(row) {
     return {
       agent_id: row.agent_id ? String(row.agent_id).trim() : null,
