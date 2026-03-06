@@ -1,6 +1,7 @@
 const ScannerService = require('../services/ScannerService');
 const AuditService = require('../services/AuditService');
 const asyncHandler = require('../middleware/asyncHandler');
+const db = require('../database/connection');
 
 exports.triggerScan = asyncHandler(async (req, res) => {
   const { date, full_scan } = req.body;
@@ -49,5 +50,64 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
   res.json({
     message: 'Escaneo y selección completados',
     data: { scan: scanResult, audit: auditResult },
+  });
+});
+
+exports.diagnose = asyncHandler(async (req, res) => {
+  const { date } = req.query;
+  if (!date) return res.status(400).json({ error: 'Falta parámetro ?date=YYYY-MM-DD' });
+
+  // Agent IDs del usuario autenticado
+  const userRow = await db('users').where('id', req.user.id).select('name', 'agent_ids').first();
+  const agentIds = userRow?.agent_ids
+    ? (typeof userRow.agent_ids === 'string' ? JSON.parse(userRow.agent_ids) : userRow.agent_ids)
+    : null;
+
+  // Total de grabaciones para esa fecha por fuente
+  const bySource = await db('recordings as r')
+    .join('aware_sources as s', 'r.aware_source_id', 's.id')
+    .where('r.file_date', date)
+    .groupBy('s.folder_name')
+    .select(
+      's.folder_name',
+      db.raw('COUNT(*) as total'),
+      db.raw('SUM(CASE WHEN r.agent_id IS NULL THEN 1 ELSE 0 END) as null_agent'),
+      db.raw("SUM(CASE WHEN r.agent_id IS NOT NULL AND r.agent_id != '-1' THEN 1 ELSE 0 END) as with_agent"),
+      db.raw('COUNT(DISTINCT r.agent_id) as distinct_agents')
+    );
+
+  // Cuántas grabaciones del día coinciden con los agent_ids del coordinador
+  let myAgentsCount = null;
+  let myAgentsDetail = null;
+  if (agentIds && agentIds.length) {
+    const rows = await db('recordings as r')
+      .join('aware_sources as s', 'r.aware_source_id', 's.id')
+      .join('clients as c', 's.client_id', 'c.id')
+      .where('r.file_date', date)
+      .whereIn('r.agent_id', agentIds)
+      .groupBy('r.agent_id', 'r.agent_name', 'c.code')
+      .select('r.agent_id', 'r.agent_name', 'c.code as client_code', db.raw('COUNT(*) as recordings'));
+    myAgentsCount = rows.reduce((s, r) => s + Number(r.recordings), 0);
+    myAgentsDetail = rows;
+  }
+
+  // Agentes presentes en la fecha desde fuentes claro_tyt (AWARE_8)
+  const presentAgents = await db('recordings as r')
+    .join('aware_sources as s', 'r.aware_source_id', 's.id')
+    .where('r.file_date', date)
+    .where('s.folder_name', 'AWARE_8')
+    .whereNotNull('r.agent_id')
+    .where('r.agent_id', '!=', '-1')
+    .groupBy('r.agent_id', 'r.agent_name')
+    .select('r.agent_id', 'r.agent_name', db.raw('COUNT(*) as recordings'))
+    .orderBy('recordings', 'desc');
+
+  res.json({
+    date,
+    user: userRow?.name,
+    assigned_agent_ids: agentIds,
+    recordings_by_source: bySource,
+    my_agents_on_date: { count: myAgentsCount, detail: myAgentsDetail },
+    all_agents_in_aware8: presentAgents,
   });
 });

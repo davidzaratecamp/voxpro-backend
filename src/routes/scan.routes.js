@@ -10,4 +10,7 @@ router.post('/sync', ctrl.triggerScanSync);
 // POST /api/scan/daily - escaneo + selección de auditorías (reemplaza cron manual)
 router.post('/daily', ctrl.scanAndSelect);
 
+// GET /api/scan/diagnose?date=YYYY-MM-DD - diagnóstico de grabaciones para una fecha
+router.get('/diagnose', ctrl.diagnose);
+
 module.exports = router;
