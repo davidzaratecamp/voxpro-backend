@@ -55,6 +55,11 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
   });
 });
 
+exports.forceEnrich = asyncHandler(async (req, res) => {
+  res.json({ message: 'Enriquecimiento iniciado en background' });
+  ScannerService._enrichNewRecordings().catch(() => {});
+});
+
 exports.diagnose = asyncHandler(async (req, res) => {
   const { date } = req.query;
   if (!date) return res.status(400).json({ error: 'Falta parámetro ?date=YYYY-MM-DD' });
