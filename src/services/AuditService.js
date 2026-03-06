@@ -55,10 +55,10 @@ class AuditService {
     const workDayIndex = targetDay === 0 ? 6 : targetDay;
     const remainingDays = 7 - workDayIndex;
 
-    // Filtro de agentes asignados a este coordinador (null = sin restricción)
-    const userRow = await db('users').where('id', userId).select('agent_names').first();
-    const agentNames = userRow?.agent_names
-      ? (typeof userRow.agent_names === 'string' ? JSON.parse(userRow.agent_names) : userRow.agent_names)
+    // Filtro de agentes asignados a este coordinador por cédula (null = sin restricción)
+    const userRow = await db('users').where('id', userId).select('agent_ids').first();
+    const agentIds = userRow?.agent_ids
+      ? (typeof userRow.agent_ids === 'string' ? JSON.parse(userRow.agent_ids) : userRow.agent_ids)
       : null;
 
     // Agentes totales por cliente (toda la semana, para calcular proporciones)
@@ -71,7 +71,7 @@ class AuditService {
       .where('r.file_date', '<=', sunday)
       .select('c.code as client_code', 'r.agent_id', 'r.proyecto_id');
 
-    if (agentNames) weekAgentsQuery.whereIn('r.agent_name', agentNames);
+    if (agentIds) weekAgentsQuery.whereIn('r.agent_id', agentIds);
 
     const weekAgents = await weekAgentsQuery;
 
@@ -120,12 +120,12 @@ class AuditService {
     }
 
     // Calcular cuota diaria por cliente
-    // Si el coordinador tiene agentes asignados (agentNames), se traen TODOS de una vez.
+    // Si el coordinador tiene agentes asignados (agentIds), se traen TODOS de una vez.
     // LV tampoco tiene cuota — se auditan todos los elegibles.
     // Para otros clientes: cuota = ceil((MAX_PER_AGENT * agentes - ya_seleccionados) / días_restantes)
     const quotas = new Map();
     for (const row of agentCounts) {
-      if (row.client_code === 'lv' || agentNames) {
+      if (row.client_code === 'lv' || agentIds) {
         quotas.set(row.client_code, Infinity);
         continue;
       }
@@ -153,7 +153,7 @@ class AuditService {
         'c.code as client_code'
       );
 
-    if (agentNames) recordingsQuery.whereIn('r.agent_name', agentNames);
+    if (agentIds) recordingsQuery.whereIn('r.agent_id', agentIds);
 
     const recordings = await recordingsQuery;
 
@@ -173,7 +173,7 @@ class AuditService {
         }
       } else {
         // Coordinadores con agentes asignados: sin límite semanal por agente
-        if (!agentNames) {
+        if (!agentIds) {
           const agentKey = `${rec.agent_id}::${rec.client_code}`;
           if ((selectedCountByAgent.get(agentKey) || 0) >= MAX_PER_AGENT) continue;
         }
