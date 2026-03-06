@@ -15,15 +15,16 @@ function start() {
   }
 
   scanTask = cron.schedule(schedule, async () => {
-    logger.info('Job diario: iniciando escaneo catch-up + selección de auditorías');
+    logger.info('Job diario: iniciando escaneo catch-up + limpieza');
     try {
       // 1. Escanear grabaciones (catch-up: cubre días faltantes + ayer)
       const scanResult = await ScannerService.runCatchUp();
       logger.info('Job diario: escaneo completado', scanResult);
 
-      // 2. Seleccionar auditorías del día anterior
-      const auditResult = await AuditService.selectForDay();
-      logger.info('Job diario: selección de auditorías completada', auditResult);
+      // 2. Limpiar grabaciones del día anterior que ningún coordinador seleccionó
+      // Corre a las 2 AM, cuando los coordinadores ya terminaron su jornada
+      const cleanupResult = await ScannerService.cleanupUnselected();
+      logger.info('Job diario: limpieza completada', cleanupResult);
     } catch (err) {
       logger.error('Job diario: fallido', err);
     }

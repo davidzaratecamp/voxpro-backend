@@ -44,11 +44,10 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
   const selectDate = date || yesterday.toISOString().slice(0, 10);
   const auditResult = await AuditService.selectForDay(selectDate, req.user.id);
 
-  // 3. Limpiar grabaciones no seleccionadas para auditoría
-  const cleanupResult = await ScannerService.cleanupUnselected();
-
+  // El cleanup ya NO corre aquí — corre en el job nocturno (2 AM)
+  // para que todos los coordinadores tengan el día entero para escanear.
   res.json({
     message: 'Escaneo y selección completados',
-    data: { scan: scanResult, audit: auditResult, cleanup: cleanupResult },
+    data: { scan: scanResult, audit: auditResult },
   });
 });
