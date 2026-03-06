@@ -120,12 +120,13 @@ class AuditService {
     }
 
     // Calcular cuota diaria por cliente
-    // cuota = ceil((MAX_PER_AGENT * agentes - ya_seleccionados) / días_restantes)
-    // LV no tiene cuota — se auditan todos los elegibles
+    // Si el coordinador tiene agentes asignados (agentNames), se traen TODOS de una vez.
+    // LV tampoco tiene cuota — se auditan todos los elegibles.
+    // Para otros clientes: cuota = ceil((MAX_PER_AGENT * agentes - ya_seleccionados) / días_restantes)
     const quotas = new Map();
     for (const row of agentCounts) {
-      if (row.client_code === 'lv') {
-        quotas.set('lv', Infinity);
+      if (row.client_code === 'lv' || agentNames) {
+        quotas.set(row.client_code, Infinity);
         continue;
       }
       const alreadyDone = selectedByClient.get(row.client_code) || 0;
