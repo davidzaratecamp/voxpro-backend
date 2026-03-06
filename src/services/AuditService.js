@@ -172,9 +172,11 @@ class AuditService {
           lvRecordings.push(rec);
         }
       } else {
-        // Saltar si este auditor ya seleccionó MAX_PER_AGENT veces a este agente esta semana
-        const agentKey = `${rec.agent_id}::${rec.client_code}`;
-        if ((selectedCountByAgent.get(agentKey) || 0) >= MAX_PER_AGENT) continue;
+        // Coordinadores con agentes asignados: sin límite semanal por agente
+        if (!agentNames) {
+          const agentKey = `${rec.agent_id}::${rec.client_code}`;
+          if ((selectedCountByAgent.get(agentKey) || 0) >= MAX_PER_AGENT) continue;
+        }
         // Saltar si esta grabación ya fue seleccionada por este auditor
         if (selectedRecordingIds.has(String(rec.id))) continue;
 
