@@ -65,6 +65,32 @@ exports.updateStatus = asyncHandler(async (req, res) => {
   res.json({ message: 'Estado actualizado', data: { id: req.params.id, status } });
 });
 
+exports.byAgent = asyncHandler(async (req, res) => {
+  const { agent_id, date } = req.query;
+  if (!agent_id || !date) {
+    return res.status(400).json({ error: true, message: 'Faltan parámetros agent_id y date' });
+  }
+  const clientCodes = req.user.client_codes || [];
+  const db = require('../database/connection');
+
+  const recordings = await db('recordings as r')
+    .join('aware_sources as s', 'r.aware_source_id', 's.id')
+    .join('clients as c', 's.client_id', 'c.id')
+    .where('r.agent_id', agent_id)
+    .where('r.file_date', date)
+    .whereIn('c.code', clientCodes)
+    .where('r.file_size', '>=', 10240)
+    .orderBy('r.call_duration', 'desc')
+    .limit(20)
+    .select(
+      'r.id', 'r.file_name', 'r.call_duration', 'r.file_size',
+      'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
+      'c.code as client_code'
+    );
+
+  res.json({ data: recordings });
+});
+
 exports.getPending = asyncHandler(async (req, res) => {
   const { client, limit } = req.query;
   const recordings = await RecordingService.getPending({

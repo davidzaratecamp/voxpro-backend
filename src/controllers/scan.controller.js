@@ -40,18 +40,36 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
   // 1. Escanear grabaciones del día
   const scanResult = await ScannerService.run({ targetDate: date });
 
-  // 2. Seleccionar auditorías para ese mismo día escaneado
-  // Si no se pasó fecha, ScannerService usó "ayer" — usamos la misma lógica aquí
   const yesterday = new Date();
   yesterday.setDate(yesterday.getDate() - 1);
   const selectDate = date || yesterday.toISOString().slice(0, 10);
-  const auditResult = await AuditService.selectForDay(selectDate, req.user.id);
 
-  // El cleanup ya NO corre aquí — corre en el job nocturno (2 AM)
-  // para que todos los coordinadores tengan el día entero para escanear.
+  // 2. Devolver lista de agentes con grabaciones ese día (filtrada por coordinador)
+  const userRow = await db('users').where('id', req.user.id).select('agent_ids').first();
+  const agentIds = userRow?.agent_ids
+    ? (typeof userRow.agent_ids === 'string' ? JSON.parse(userRow.agent_ids) : userRow.agent_ids)
+    : null;
+  const clientCodes = req.user.client_codes || [];
+
+  const agentsQuery = db('recordings as r')
+    .join('aware_sources as s', 'r.aware_source_id', 's.id')
+    .join('clients as c', 's.client_id', 'c.id')
+    .where('r.file_date', selectDate)
+    .whereNotNull('r.agent_id')
+    .where('r.agent_id', '!=', '-1')
+    .where('r.file_size', '>=', 10240)
+    .whereIn('c.code', clientCodes)
+    .groupBy('r.agent_id', 'r.agent_name')
+    .select('r.agent_id', 'r.agent_name', db.raw('COUNT(*) as recording_count'))
+    .orderBy('r.agent_name');
+
+  if (agentIds) agentsQuery.whereIn('r.agent_id', agentIds);
+
+  const agents = await agentsQuery;
+
   res.json({
-    message: 'Escaneo y selección completados',
-    data: { scan: scanResult, audit: auditResult },
+    message: 'Escaneo completado',
+    data: { scan: scanResult, agents, date: selectDate },
   });
 });
 
