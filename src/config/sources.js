@@ -37,7 +37,7 @@ const AWARE_SOURCES = [
     folder: 'AWARE_7',
     clientCode: 'claro_tyt',
     clientName: 'Claro TYT',
-    db: { host: '10.255.255.7', database: 'aware', user: group2User, password: group2Pass, port: 5432 },
+    db: { host: '10.255.255.8', database: 'aware', user: group1User, password: group1Pass, port: 5432 },
     schema: 'standard',
   },
   {
