@@ -76,6 +76,9 @@ exports.byAgent = asyncHandler(async (req, res) => {
   const recordings = await db('recordings as r')
     .join('aware_sources as s', 'r.aware_source_id', 's.id')
     .join('clients as c', 's.client_id', 'c.id')
+    .leftJoin('audit_selections as a', function () {
+      this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
+    })
     .where('r.agent_id', agent_id)
     .where('r.file_date', date)
     .whereIn('c.code', clientCodes)
@@ -83,9 +86,10 @@ exports.byAgent = asyncHandler(async (req, res) => {
     .orderBy('r.call_duration', 'desc')
     .limit(20)
     .select(
-      'r.id', 'r.file_name', 'r.call_duration', 'r.file_size',
+      'r.id', 'r.file_name', 'r.call_duration',
       'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
-      'c.code as client_code'
+      'c.code as client_code',
+      'a.id as selection_id', 'a.status as selection_status'
     );
 
   res.json({ data: recordings });
