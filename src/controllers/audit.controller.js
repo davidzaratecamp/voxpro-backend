@@ -51,8 +51,10 @@ exports.selectOne = asyncHandler(async (req, res) => {
     return res.status(403).json({ error: true, message: 'Acceso no autorizado' });
   }
 
-  // Calcular semana
-  const dateStr = recording.file_date.toString().slice(0, 10);
+  // Calcular semana (file_date puede llegar como Date object o string)
+  const dateStr = recording.file_date instanceof Date
+    ? recording.file_date.toISOString().slice(0, 10)
+    : String(recording.file_date).slice(0, 10);
   const [y, m, d] = dateStr.split('-').map(Number);
   const ref = new Date(Date.UTC(y, m - 1, d));
   const diff = ref.getUTCDay() === 0 ? 6 : ref.getUTCDay() - 1;
