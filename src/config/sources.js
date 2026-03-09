@@ -2,11 +2,13 @@
 // Cada servidor Aware tiene su propia DB con datos de llamadas y agentes.
 // La conexión se hace vía túnel SSH a través de Kraken.
 
-// Credenciales desde variables de entorno (2 grupos)
+// Credenciales desde variables de entorno (3 grupos)
 const group1User = process.env.AWARE_DB_USER_GROUP1 || 'analista';
 const group1Pass = process.env.AWARE_DB_PASS_GROUP1 || '';
 const group2User = process.env.AWARE_DB_USER_GROUP2 || 'analista';
 const group2Pass = process.env.AWARE_DB_PASS_GROUP2 || '';
+const group3User = process.env.AWARE_DB_USER_GROUP3 || 'analista';
+const group3Pass = process.env.AWARE_DB_PASS_GROUP3 || '';
 
 const AWARE_SOURCES = [
   // Obama - 3 carpetas, 3 servidores distintos
@@ -32,13 +34,13 @@ const AWARE_SOURCES = [
     schema: 'standard',
   },
 
-  // Claro TYT - Inbound (AWARE_8) y Outbound (AWARE_7, agentes de Jenny)
+  // Claro TYT - Inbound (AWARE_8) y Outbound (AWARE_7, agentes Jenny/Fabian/Nicole)
   {
     folder: 'AWARE_7',
     clientCode: 'claro_tyt',
     clientName: 'Claro TYT',
-    db: { host: '10.255.255.8', database: 'aware', user: group1User, password: group1Pass, port: 5432 },
-    schema: 'standard',
+    db: { host: '10.255.255.7', database: 'awareccm', user: group3User, password: group3Pass, port: 5432 },
+    schema: 'awareccm',
   },
   {
     folder: 'AWARE_8',
