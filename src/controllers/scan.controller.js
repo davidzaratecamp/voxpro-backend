@@ -57,7 +57,6 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
     .where('r.file_date', selectDate)
     .whereNotNull('r.agent_id')
     .where('r.agent_id', '!=', '-1')
-    .where('r.file_size', '>=', 10240)
     .whereIn('c.code', clientCodes)
     .groupBy('r.agent_id', 'r.agent_name')
     .select('r.agent_id', 'r.agent_name', db.raw('COUNT(*) as recording_count'))
