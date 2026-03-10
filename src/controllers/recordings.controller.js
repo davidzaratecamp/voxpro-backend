@@ -95,6 +95,35 @@ exports.byAgent = asyncHandler(async (req, res) => {
   res.json({ data: recordings });
 });
 
+exports.byAgentPhone = asyncHandler(async (req, res) => {
+  const { agent_id, date, phone } = req.query;
+  if (!agent_id || !date || !phone) {
+    return res.status(400).json({ error: true, message: 'Faltan parámetros agent_id, date y phone' });
+  }
+  const clientCodes = req.user.client_codes || [];
+  const db = require('../database/connection');
+
+  const recordings = await db('recordings as r')
+    .join('aware_sources as s', 'r.aware_source_id', 's.id')
+    .join('clients as c', 's.client_id', 'c.id')
+    .leftJoin('audit_selections as a', function () {
+      this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
+    })
+    .where('r.agent_id', agent_id)
+    .where('r.file_date', date)
+    .where('r.call_phone', phone)
+    .whereIn('c.code', clientCodes)
+    .orderBy('r.call_duration', 'desc')
+    .select(
+      'r.id', 'r.file_name', 'r.call_duration',
+      'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
+      'c.code as client_code',
+      'a.id as selection_id', 'a.status as selection_status'
+    );
+
+  res.json({ data: recordings });
+});
+
 exports.getPending = asyncHandler(async (req, res) => {
   const { client, limit } = req.query;
   const recordings = await RecordingService.getPending({
