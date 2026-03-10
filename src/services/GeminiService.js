@@ -208,7 +208,7 @@ Los ítems de alto impacto son "cumple" si el agente NO comete la falta (ej: "Ma
 UMBRAL DE ALTO IMPACTO (CRÍTICO — leer antes de evaluar):
 Los ítems de alto impacto solo deben marcarse como "no cumple" cuando hay una FALTA GRAVE y EVIDENTE cometida POR EL AGENTE. No son para evaluar calidad, calidez o resultados — eso es responsabilidad de los criterios generales. Ejemplos específicos:
 - "Falta de empatía con el cliente": Solo NO cumple si el agente fue GROSERO, HOSTIL, DESPECTIVO o mostró total INDIFERENCIA activa (ej: ignorar al cliente, tratarlo mal, ser sarcástico, burlarse). NO aplica si simplemente faltó calidez, rapport o técnicas de empatía — eso se penaliza en criterios generales. Un agente que es educado y mantiene la calma ante un cliente frustrado CUMPLE este ítem, aunque le falte más empatía activa.
-- "Maltrato al cliente": Solo si hay insultos, gritos, humillación o agresión verbal directa.
+- "Maltrato al cliente": Se activa automáticamente si el AGENTE usa groserías, insultos o lenguaje degradante contra el cliente. Palabras como "hijueputa", "hp", "gonorrea", "malparido", "pirobo", "marica" (en tono ofensivo), "imbécil", "idiota", "estúpido", "mamando gallo" (en tono insultante), "maldita sea", "mecagüen", o cualquier insulto similar dicho POR EL AGENTE → automáticamente NO CUMPLE con cita exacta. También aplica si el agente grita, humilla o trata al cliente con desprecio. Si detectas cualquier grosería o insulto en boca del Agente, DEBES marcar este ítem como no cumple.
 - "Falta de gestión comercial": Solo si el agente NO hizo ABSOLUTAMENTE NINGÚN intento de gestión. Si el agente intentó gestionar pero no logró la venta (por circunstancias fuera de su control), CUMPLE.
 - "Recapitulación": Si no hubo venta o el contexto no lo permite (ej: cliente rechaza el servicio), marca cumple. Solo NO cumple si hubo una venta/acuerdo y el agente no recapituló.
 - Items como "No referido", "No marcaciones", etc.: Evalúa si el agente hizo el esfuerzo correspondiente, no si el resultado fue positivo.
@@ -359,6 +359,9 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
 
     // Post-procesamiento: forzar N/A en criterios no verificables por audio
     this._applyUnverifiableOverride(parsed);
+
+    // Post-procesamiento: detectar groserías del agente → forzar maltrato_cliente = no cumple
+    this._applyProfanityOverride(parsed);
 
     // Calcular score
     const { score, generalResults, highImpactResults, highImpactFailed } =
@@ -676,6 +679,80 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
         parsed.general[key].observacion = msg;
       }
     }
+  }
+
+  /**
+   * Detecta groserías o insultos dichos por el AGENTE en la transcripción
+   * y fuerza maltrato_cliente = no cumple con cita exacta.
+   * Opera sobre la transcripción final para cubrir casos donde Gemini
+   * atribuyó erróneamente el parlamento al Cliente en lugar del Agente.
+   */
+  _applyProfanityOverride(parsed) {
+    if (!parsed.high_impact?.maltrato_cliente) return;
+
+    const transcription = parsed.transcription || '';
+    const lines = transcription.split('\n');
+
+    // Groserías y patrones de insulto colombianos (case-insensitive)
+    const PROFANITY_PATTERNS = [
+      /hijueputa|hp\b|hpta/,
+      /gonorrea/,
+      /malparido/,
+      /pirobo/,
+      /\bmarica\b.*(\bidiota\b|\bestúpido\b|\bimbécil\b|pirobo|gonorrea)?/,
+      /imbécil|imbecil/,
+      /\bidiota\b/,
+      /estúpido|estupido/,
+      /mamando\s*gallo/,
+      /maldita\s*sea/,
+      /mecagüen|me\s*cagüen|mecagen/,
+      /\bputa\b/,
+      /hijue(?:puta|madre)/,
+      /\bconcha\b.*\bmadre\b/,
+      /\bpendejo\b/,
+      /\bcarajo\b.*(?:usted|cliente|señor|señora)/,
+      /\bme\s+cago\b/,
+      /\bvete\s+a\b/,
+      /animal\b.*(?:usted|cliente)/,
+    ];
+
+    // Buscar solo en líneas atribuidas al Agente
+    const agentLines = lines.filter((l) => /^Agente:/i.test(l));
+
+    let foundCita = null;
+    for (const line of agentLines) {
+      const lower = line.toLowerCase();
+      const match = PROFANITY_PATTERNS.find((p) => p.test(lower));
+      if (match) {
+        // Usar el texto original de la línea (sin el prefijo "Agente: ")
+        foundCita = line.replace(/^Agente:\s*/i, '').trim();
+        break;
+      }
+    }
+
+    // Si no se encontró en líneas del Agente, buscar en TODO el texto
+    // (por si Gemini atribuyó erróneamente la grosería al Cliente)
+    if (!foundCita) {
+      const fullLower = transcription.toLowerCase();
+      const match = PROFANITY_PATTERNS.find((p) => p.test(fullLower));
+      if (match) {
+        // Encontrar la línea que contiene el match
+        const matchingLine = lines.find((l) => PROFANITY_PATTERNS.some((p) => p.test(l.toLowerCase())));
+        if (matchingLine) {
+          foundCita = matchingLine.replace(/^(?:Agente|Cliente):\s*/i, '').trim();
+        }
+      }
+    }
+
+    if (!foundCita) return;
+
+    logger.info(`Grosería detectada en transcripción, forzando maltrato_cliente = no cumple. Cita: "${foundCita}"`);
+
+    parsed.high_impact.maltrato_cliente.cumple = false;
+    parsed.high_impact.maltrato_cliente.cita = foundCita;
+    parsed.high_impact.maltrato_cliente.observacion =
+      'FORZADO AUTOMÁTICAMENTE: Se detectó lenguaje soez o insulto del AGENTE. ' +
+      'Cualquier grosería o insulto del agente hacia el cliente constituye maltrato y genera score 0.';
   }
 
   /**
