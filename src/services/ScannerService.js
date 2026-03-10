@@ -492,6 +492,18 @@ class ScannerService {
             }
             if (rec.proyecto_id != null) {
               updateData.proyecto_id = rec.proyecto_id;
+              // Reasignar a la fuente LV si el proyecto corresponde a LV (34=ventas, 35=customer)
+              if (rec.proyecto_id === 34 || rec.proyecto_id === 35) {
+                const lvSource = await db('aware_sources')
+                  .join('clients as c', 'aware_sources.client_id', 'c.id')
+                  .where('aware_sources.folder_name', folder)
+                  .where('c.code', 'lv')
+                  .select('aware_sources.id')
+                  .first();
+                if (lvSource) {
+                  updateData.aware_source_id = lvSource.id;
+                }
+              }
             }
             await db('recordings').where({ id: rec.id }).update(updateData);
           }

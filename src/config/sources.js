@@ -11,6 +11,15 @@ const group3User = process.env.AWARE_DB_USER_GROUP3 || 'analista';
 const group3Pass = process.env.AWARE_DB_PASS_GROUP3 || '';
 
 const AWARE_SOURCES = [
+  // LV (Vital Health) - comparte SFTP AWARE_30 con Obama, distinguido por proyecto_id (34=ventas, 35=customer)
+  {
+    folder: 'AWARE_30',
+    clientCode: 'lv',
+    clientName: 'LV Vital Health',
+    db: { host: '10.255.255.30', database: 'aware', user: group1User, password: group1Pass, port: 5432 },
+    schema: 'standard',
+  },
+
   // Obama - 3 carpetas, 3 servidores distintos
   {
     folder: 'AWARE_30',
