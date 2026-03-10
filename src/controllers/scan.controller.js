@@ -72,6 +72,56 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
   });
 });
 
+exports.weekAgents = asyncHandler(async (req, res) => {
+  const { week_start } = req.query;
+  const clientCodes = req.user.client_codes || [];
+
+  // Calcular los 7 días de la semana
+  const start = week_start ? new Date(week_start + 'T00:00:00') : (() => {
+    const d = new Date();
+    d.setDate(d.getDate() - d.getDay() + 1); // lunes
+    return d;
+  })();
+  const days = [];
+  for (let i = 0; i < 7; i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate() + i);
+    days.push(d.toISOString().slice(0, 10));
+  }
+
+  // Agentes por día para los días de la semana
+  const rows = await db('recordings as r')
+    .join('aware_sources as s', 'r.aware_source_id', 's.id')
+    .join('clients as c', 's.client_id', 'c.id')
+    .whereIn('r.file_date', days)
+    .whereNotNull('r.agent_id')
+    .where('r.agent_id', '!=', '-1')
+    .whereIn('c.code', clientCodes)
+    .groupBy('r.file_date', 'r.agent_id', 'r.agent_name')
+    .select('r.file_date', 'r.agent_id', 'r.agent_name', db.raw('COUNT(*) as recording_count'));
+
+  // Agrupar por fecha
+  const byDate = {};
+  for (const row of rows) {
+    const date = row.file_date instanceof Date
+      ? row.file_date.toISOString().slice(0, 10)
+      : String(row.file_date).slice(0, 10);
+    if (!byDate[date]) byDate[date] = [];
+    byDate[date].push({
+      agent_id: row.agent_id,
+      agent_name: row.agent_name,
+      recording_count: Number(row.recording_count),
+    });
+  }
+
+  // Ordenar cada día por recording_count desc
+  for (const date of Object.keys(byDate)) {
+    byDate[date].sort((a, b) => b.recording_count - a.recording_count);
+  }
+
+  res.json({ data: byDate });
+});
+
 exports.forceEnrich = asyncHandler(async (req, res) => {
   res.json({ message: 'Enriquecimiento iniciado en background' });
   ScannerService._enrichNewRecordings().catch(() => {});

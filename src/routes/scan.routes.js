@@ -13,6 +13,9 @@ router.post('/daily', ctrl.scanAndSelect);
 // POST /api/scan/enrich - fuerza re-enriquecimiento de grabaciones pendientes
 router.post('/enrich', ctrl.forceEnrich);
 
+// GET /api/scan/week-agents?week_start=YYYY-MM-DD - agentes por día para la semana actual
+router.get('/week-agents', ctrl.weekAgents);
+
 // GET /api/scan/diagnose?date=YYYY-MM-DD - diagnóstico de grabaciones para una fecha
 router.get('/diagnose', ctrl.diagnose);
 
