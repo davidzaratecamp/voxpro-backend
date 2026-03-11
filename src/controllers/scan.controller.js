@@ -76,6 +76,11 @@ exports.weekAgents = asyncHandler(async (req, res) => {
   const { week_start } = req.query;
   const clientCodes = req.user.client_codes || [];
 
+  const userRow = await db('users').where('id', req.user.id).select('agent_ids').first();
+  const agentIds = userRow?.agent_ids
+    ? (typeof userRow.agent_ids === 'string' ? JSON.parse(userRow.agent_ids) : userRow.agent_ids)
+    : null;
+
   // Calcular los 7 días de la semana
   const start = week_start ? new Date(week_start + 'T00:00:00') : (() => {
     const d = new Date();
@@ -90,7 +95,7 @@ exports.weekAgents = asyncHandler(async (req, res) => {
   }
 
   // Agentes por día para los días de la semana
-  const rows = await db('recordings as r')
+  const agentsQuery = db('recordings as r')
     .join('aware_sources as s', 'r.aware_source_id', 's.id')
     .join('clients as c', 's.client_id', 'c.id')
     .whereIn('r.file_date', days)
@@ -99,6 +104,10 @@ exports.weekAgents = asyncHandler(async (req, res) => {
     .whereIn('c.code', clientCodes)
     .groupBy('r.file_date', 'r.agent_id', 'r.agent_name')
     .select('r.file_date', 'r.agent_id', 'r.agent_name', db.raw('COUNT(*) as recording_count'));
+
+  if (agentIds) agentsQuery.whereIn('r.agent_id', agentIds);
+
+  const rows = await agentsQuery;
 
   // Agrupar por fecha
   const byDate = {};
