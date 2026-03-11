@@ -4,22 +4,6 @@
  * Los agent_ids se toman directamente de segmentacionObama.js (cédulas).
  */
 const bcrypt = require('bcrypt');
-const segmentacionObama = require('../../../../segmentacion/segmentacionObama');
-
-function getCoordinatorAgents(coordinadorName) {
-  const grupos = segmentacionObama.filter((g) => g.coordinador === coordinadorName);
-  const agentIds = [];
-  const agentNames = [];
-  for (const grupo of grupos) {
-    for (const agente of grupo.agentes) {
-      if (!agentIds.includes(agente.documento)) {
-        agentIds.push(agente.documento);
-        agentNames.push(agente.nombre);
-      }
-    }
-  }
-  return { agentIds, agentNames };
-}
 
 exports.seed = async function (knex) {
   const hash = await bcrypt.hash('password', 10);
@@ -28,18 +12,48 @@ exports.seed = async function (knex) {
     {
       username: 'jorge_patino',
       name: 'Jorge Patiño',
-      coordinadorKey: 'Jorge Patiño',
+      agentIds: [
+        '1001029797', // Salgado Manjarres Any Yisela (ACA)
+        '1012335146', // Bejarano Miranda Geidy Tatiana (ACA)
+        '1110468057', // Rodriguez Leon Karen Lorena (ACA)
+        '1021666020', // Torres Triana Nazly Anjelyn (PRO 100)
+        '1010021689', // Bejarano Obando Natalia Vanessa (PRO 100)
+        '1000330143', // Acosta Mesa Kevin Santiago (PRO 100)
+        '1103981404', // Mendoza Mercado Letty Sofia (PRO 100)
+        '1000776704', // Rey Carrero Cristian (USA)
+        '1019142117', // Hurtado Moreno Dina (USA)
+      ],
+      agentNames: [
+        'Salgado Manjarres Any Yisela',
+        'Bejarano Miranda Geidy Tatiana',
+        'Rodriguez Leon Karen Lorena',
+        'Torres Triana Nazly Anjelyn',
+        'Bejarano Obando Natalia Vanessa',
+        'Acosta Mesa Kevin Santiago',
+        'Mendoza Mercado Letty Sofia',
+        'Rey Carrero Cristian',
+        'Hurtado Moreno Dina',
+      ],
     },
     {
       username: 'julissa_diaz',
       name: 'Julissa Diaz',
-      coordinadorKey: 'Julissa Diaz',
+      agentIds: [
+        '1023364825', // Escobar Torres Andres Felipe (CHOCK)
+        '1013652243', // Meléndez Pico Tatiana Paola (CHOCK)
+        '1012441401', // Suárez Omar Montoya (CHOCK)
+        '1013689123', // Cardenas Carrillo Diego Alejandro (CHOCK)
+      ],
+      agentNames: [
+        'Escobar Torres Andres Felipe',
+        'Meléndez Pico Tatiana Paola',
+        'Suárez Omar Montoya',
+        'Cardenas Carrillo Diego Alejandro',
+      ],
     },
   ];
 
   for (const coord of coordinators) {
-    const { agentIds, agentNames } = getCoordinatorAgents(coord.coordinadorKey);
-
     const exists = await knex('users').where('username', coord.username).first();
     if (!exists) {
       await knex('users').insert({
@@ -48,21 +62,21 @@ exports.seed = async function (knex) {
         name: coord.name,
         role: 'coordinator_obama',
         client_codes: JSON.stringify(['obama']),
-        agent_names: JSON.stringify(agentNames),
-        agent_ids: JSON.stringify(agentIds),
+        agent_names: JSON.stringify(coord.agentNames),
+        agent_ids: JSON.stringify(coord.agentIds),
         active: true,
       });
-      console.log(`✓ Creado: ${coord.name} (${agentIds.length} agentes)`);
+      console.log(`✓ Creado: ${coord.name} (${coord.agentIds.length} agentes)`);
     } else {
       await knex('users').where('username', coord.username).update({
-        agent_names: JSON.stringify(agentNames),
-        agent_ids: JSON.stringify(agentIds),
+        agent_names: JSON.stringify(coord.agentNames),
+        agent_ids: JSON.stringify(coord.agentIds),
         role: 'coordinator_obama',
         client_codes: JSON.stringify(['obama']),
       });
-      console.log(`✓ Actualizado: ${coord.name} (${agentIds.length} agentes)`);
+      console.log(`✓ Actualizado: ${coord.name} (${coord.agentIds.length} agentes)`);
     }
 
-    console.log(`  Agentes: ${agentIds.join(', ')}`);
+    console.log(`  Agentes: ${coord.agentIds.join(', ')}`);
   }
 };
