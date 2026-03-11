@@ -83,7 +83,11 @@ exports.byAgent = asyncHandler(async (req, res) => {
     .where('r.file_date', date)
     .whereIn('c.code', clientCodes)
     .modify((q) => {
-      if (!clientCodes.includes('lv')) q.where('r.file_size', '>=', 10240).limit(20);
+      if (clientCodes.includes('obama')) {
+        q.where('r.call_duration', '>', 0).limit(20);
+      } else if (!clientCodes.includes('lv')) {
+        q.where('r.file_size', '>=', 10240).limit(20);
+      }
     })
     .orderBy('r.call_duration', 'desc')
     .select(
