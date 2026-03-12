@@ -169,6 +169,20 @@ exports.analyze = asyncHandler(async (req, res) => {
   res.json({ message: 'Análisis completado', data: result });
 });
 
+exports.reanalyze = asyncHandler(async (req, res) => {
+  const selection = await AuditService.getById(req.params.id);
+  const err = checkAccess(selection, req);
+  if (err) return res.status(err.status).json(err.body);
+
+  // Borrar análisis previo para forzar re-análisis limpio
+  await db('qa_evaluations').where('recording_id', selection.recording_id).delete();
+  await db('transcriptions').where('recording_id', selection.recording_id).delete();
+  await db('recordings').where('id', selection.recording_id).update({ status: 'transcribed' });
+
+  const result = await AnalysisService.analyzeSelection(req.params.id);
+  res.json({ message: 'Re-análisis completado', data: result });
+});
+
 exports.updateAnalysis = asyncHandler(async (req, res) => {
   const selection = await AuditService.getById(req.params.id);
   const err = checkAccess(selection, req);
