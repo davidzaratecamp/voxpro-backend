@@ -354,6 +354,9 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
     // Post-procesamiento: detectar llamada cortada y forzar N/A en criterios de cierre
     this._applyDroppedCallOverride(parsed, criteria);
 
+    // Post-procesamiento: detectar rechazo explícito del cliente y forzar N/A en fases no alcanzadas
+    this._applyRejectionOverride(parsed, criteria);
+
     // Post-procesamiento: forzar N/A en manejo_objeciones si no hubo objeción
     this._applyNoObjectionOverride(parsed, criteria);
 
@@ -646,6 +649,100 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
               parsed.general[key].observacion = 'N/A — el cliente solicitó ser contactado después y cortó la llamada; el agente no tuvo oportunidad real de completar esta fase';
             }
           }
+        }
+      }
+    }
+  }
+
+  /**
+   * Detecta rechazo explícito del cliente (no le interesa el servicio) y fuerza N/A
+   * en criterios de fases que el agente no pudo alcanzar por la decisión del cliente.
+   *
+   * Diferencia con _applyDroppedCallOverride:
+   * - DroppedCall: cliente no puede hablar (ocupado, cuelga abruptamente)
+   * - Rejection: cliente escuchó y decidió no querer el servicio → fases post-rechazo = N/A
+   */
+  _applyRejectionOverride(parsed, criteria) {
+    const transcription = (parsed.transcription || '');
+    const lower = transcription.toLowerCase();
+    const lines = transcription.split('\n').filter((l) => l.trim());
+
+    // Patrones de rechazo explícito del cliente
+    const rejectionPatterns = [
+      /no me interesa/,
+      /no (estoy |me encuentro )?interesad[ao]/,
+      /no (lo |la )?quiero/,
+      /no (lo |la )?necesito/,
+      /no gracias.*no/,
+      /no quiero (nada|ningún|ninguna|saber nada)/,
+      /no (me |nos )?hace falta/,
+      /no (me |nos )?sirve/,
+      /no (lo |la )?voy a tomar/,
+      /no (me |nos )?interesa (para nada|en absoluto|el servicio|el seguro|la póliza)/,
+      /retire.*de.*lista|no (me )?llam(e|en) (más|nunca)/,
+    ];
+
+    // Buscar rechazo solo en líneas del cliente
+    const clientLines = lines.filter((l) => /^Cliente:/i.test(l));
+    const clientRejected = clientLines.some((l) =>
+      rejectionPatterns.some((p) => p.test(l.toLowerCase()))
+    );
+
+    if (!clientRejected) return;
+
+    // Criterios que REQUIEREN que el cliente acepte o al menos no haya rechazado.
+    // Si rechazó, el agente no tuvo oportunidad de completarlos — no es su culpa.
+    const POST_REJECTION_CRITERIA = {
+      obama_ventas: [
+        'cotizacion_ingresos',    // No se puede cotizar si el cliente rechaza
+        'explicacion_cierre',     // No se puede explicar/cerrar si el cliente rechaza
+      ],
+      obama_customer: [
+        'complementar_dental_vision', // No aplica si cliente rechaza
+        'cierre_efectivo',
+      ],
+      lv_ventas: [
+        'rebatimiento_cierre',
+        'reformulacion',
+      ],
+      lv_customer: [
+        'cierre_llamada',
+        'retencion_fidelizacion',
+      ],
+      claro_tyt: [
+        'cierre_comercial',
+        'convenios_bancarios',
+      ],
+      claro_hogar: [
+        'cierre_comercial',
+        'habilidades_comerciales',
+      ],
+      claro_wcb: [
+        'cierre_comercial',
+      ],
+    };
+
+    const CAMPAIGN_LABELS = {
+      obama_ventas: 'obama ventas', obama_customer: 'obama customer',
+      claro_tyt: 'claro tyt', claro_hogar: 'claro hogar', claro_wcb: 'claro wcb',
+      lv_customer: 'lv customer', lv_ventas: 'lv ventas',
+    };
+
+    const campaignKey = Object.keys(POST_REJECTION_CRITERIA).find(
+      (key) => criteria.label.toLowerCase() === CAMPAIGN_LABELS[key]
+    );
+    if (!campaignKey) return;
+
+    const keysToForceNA = new Set(POST_REJECTION_CRITERIA[campaignKey]);
+
+    logger.info('Rechazo explícito del cliente detectado, forzando N/A en fases post-rechazo');
+
+    if (parsed.general) {
+      for (const key of keysToForceNA) {
+        if (parsed.general[key] && !parsed.general[key].na && !parsed.general[key].cumple) {
+          parsed.general[key].na = true;
+          parsed.general[key].observacion =
+            'N/A — el cliente rechazó el servicio explícitamente; el agente no tuvo oportunidad de completar esta fase, no es atribuible a su gestión';
         }
       }
     }
