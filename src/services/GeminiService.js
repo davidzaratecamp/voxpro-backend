@@ -525,7 +525,9 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
 
     // --- Detección 1: cliente dice explícitamente que está ocupado/no puede ---
     const droppedPatterns = [
-      /estoy (demasiado )?ocupad[ao]/,
+      /estoy.{0,20}ocupad[ao]/,           // "estoy un poco ocupado", "estoy algo ocupada", etc.
+      /ando.{0,20}ocupad[ao]/,            // "ando ocupado", "ando un poco ocupado"
+      /me encuentro.{0,20}ocupad[ao]/,
       /no (puedo|tengo tiempo) (ahorita|ahora|en este momento)/,
       /me puede[n|s]? (llamar|marcar|contactar) (después|luego|más tarde|en una hora|en un rato|mañana|otro día|otra vez)/,
       /pueden (llamarme|contactarme|marcarme) (después|luego|más tarde|mañana|otro día)/,
@@ -541,13 +543,21 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
       /después (me|nos) (llaman|llame|contactan|marcan)/,
       /al rato (me|nos) (llaman|llame|contactan)/,
       /no (tengo|puedo|estoy) (disponible|libre) (ahora|ahorita|en este momento)/,
-      /estoy ocupado|estoy ocupada/,
       /no tengo tiempo (ahora|ahorita|en este momento|para esto)/,
       /después hablamos|después les llamo|después los llamo/,
       /en otro momento/,
       /no me (moleste|molesten|llame|llamen) (ahora|ahorita|más)/,
+      /yo (le|les|los|la) (marco|llamo|contacto) (después|luego|más tarde|cuando pueda|en un rato)/,
+      /cuando (pueda|tenga tiempo|esté libre).{0,20}(llamo|marco|contacto)/,
+      /ahorita.{0,30}ocupad[ao]/,         // "ahorita ando ocupado"
+      /no (le |les )?puedo (atender|hablar) (ahora|ahorita)/,
     ];
-    const clientWantedToLeave = droppedPatterns.some((p) => p.test(lower));
+    // Solo buscar en líneas del cliente para evitar falsos positivos
+    const clientLines = lines
+      .filter((l) => /^Cliente:/i.test(l))
+      .map((l) => l.replace(/^Cliente:\s*/i, '').toLowerCase())
+      .join(' ');
+    const clientWantedToLeave = droppedPatterns.some((p) => p.test(clientLines));
 
     // --- Detección 2: corte abrupto — no hay despedida y el agente habla al final ---
     const farewell = /gracias|hasta luego|chao|adiós|bye|que (le |te )?vaya bien|fue un placer|con mucho gusto/;
