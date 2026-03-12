@@ -1,5 +1,5 @@
 /**
- * Crea los usuarios coordinadores de Obama (Jorge Patiño y Julissa Diaz).
+ * Crea los usuarios coordinadores de Obama (Jorge Patiño, Julissa Diaz, Katerine Suarez).
  * Cada coordinador ve TODOS sus agentes sin importar la campaña.
  * Los agent_ids se toman directamente de segmentacionObama.js (cédulas).
  */
@@ -49,6 +49,30 @@ exports.seed = async function (knex) {
         'Meléndez Pico Tatiana Paola',
         'Suárez Omar Montoya',
         'Cardenas Carrillo Diego Alejandro',
+      ],
+    },
+    {
+      username: 'katerine_suarez',
+      name: 'Katerine Suarez',
+      agentIds: [
+        '1030597222', // Bonilla Poveda Richard Alexander (CHOCK)
+        '1000622799', // Farfan Acosta Santiago (CHOCK)
+        '1022982816', // Sanchez Malpica Jairo Alberto (CHOCK)
+        '1022326545', // Chavez Diaz Ronald Andres (CHOCK)
+        '1023023709', // Escobar Hernandez Michell Daniela (CHOCK)
+        '1022328064', // Piña Rodriguez Cristian Rodolfo (CHOCK)
+        '1012464163', // Sebastian Castaño Alvis (CHOCK)
+        '1006457064', // Tineo Lopez Alexis Jhomnyver (CHOCK)
+      ],
+      agentNames: [
+        'Bonilla Poveda Richard Alexander',
+        'Farfan Acosta Santiago',
+        'Sanchez Malpica Jairo Alberto',
+        'Chavez Diaz Ronald Andres',
+        'Escobar Hernandez Michell Daniela',
+        'Piña Rodriguez Cristian Rodolfo',
+        'Sebastian Castaño Alvis',
+        'Tineo Lopez Alexis Jhomnyver',
       ],
     },
   ];
