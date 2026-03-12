@@ -746,6 +746,31 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
         }
       }
     }
+
+    // Proteger ítems de alto impacto que requieren cooperación del cliente.
+    // Si el cliente rechazó antes de que el agente pudiera completarlos, no pueden
+    // ser una falta grave del agente — se fuerzan a cumple.
+    const HIGH_IMPACT_PROTECTED_ON_REJECTION = {
+      obama_ventas: ['validacion_requisitos', 'recapitulacion_venta', 'pregunta_taxes'],
+      obama_customer: ['no_gestion_recuperacion', 'recapitulacion'],
+      lv_ventas: ['no_recapitulacion', 'tipificacion_crm'],
+      lv_customer: [],
+      claro_tyt: [],
+      claro_hogar: [],
+      claro_wcb: [],
+    };
+
+    const protectedHighImpact = HIGH_IMPACT_PROTECTED_ON_REJECTION[campaignKey] || [];
+
+    if (parsed.high_impact) {
+      for (const key of protectedHighImpact) {
+        if (parsed.high_impact[key] && !parsed.high_impact[key].cumple) {
+          parsed.high_impact[key].cumple = true;
+          parsed.high_impact[key].observacion =
+            'PROTEGIDO — el cliente rechazó el servicio antes de que el agente pudiera completar este ítem; no es una falta atribuible al agente';
+        }
+      }
+    }
   }
 
   /**
