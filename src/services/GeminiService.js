@@ -253,8 +253,15 @@ Si el agente agenda una llamada de seguimiento (callback) con fecha y hora espec
 - "Cuando esté tu esposo presente, nos llamas" → Cierre = CUMPLE.
 Un callback demuestra que el agente mantuvo el interés del prospecto y aseguró una segunda oportunidad. Es una técnica de ventas válida y profesional.
 
-### Regla de Validación Parcial:
-Si el agente intentó validar requisitos o recopilar información pero no pudo completar porque el cliente no tiene los datos (ej: "no sé cuánto pago, lo maneja mi esposo"), evalúa lo que el agente SÍ logró recopilar. Si hizo las preguntas correctas y obtuvo información útil (tipo de seguro, cobertura, situación), marca "cumple". Solo marca "no cumple" si el agente NO intentó validar en absoluto.
+### Regla de Validación Parcial (CRÍTICO):
+El criterio "Requisitos" evalúa si el AGENTE hizo su trabajo de preguntar y verificar — NO evalúa si el cliente califica o tiene los documentos.
+
+- Si el agente preguntó por requisitos y el cliente reveló que NO tiene documentos (pasaporte vencido, sin ID, sin estatus migratorio, etc.) → marca "cumple". El agente cumplió con preguntar y además manejó correctamente la situación explicando lo que necesita el cliente.
+- Si el agente preguntó por documentos y el cliente dijo que los está tramitando, que no los tiene disponibles, que están vencidos, etc. → "cumple". El agente hizo su función.
+- Si el agente intentó validar requisitos pero no pudo completar porque el cliente interrumpió o no dio la información → evalúa lo que el agente SÍ logró preguntar. Si las preguntas fueron correctas, marca "cumple".
+- Solo marca "no cumple" si el agente NUNCA intentó preguntar por requisitos, documentos, o información de elegibilidad.
+
+Recuerda: el agente NO controla si el cliente califica. Solo controla si hizo las preguntas correctas.
 
 ### Regla de Manejo de Objeciones:
 El criterio "Manejo de Objeciones" SOLO aplica cuando el cliente presenta una objeción CLARA: rechazo explícito, duda adversarial, queja, resistencia a la compra o al servicio.
