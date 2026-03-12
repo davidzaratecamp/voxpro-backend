@@ -524,14 +524,25 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
     const droppedPatterns = [
       /estoy (demasiado )?ocupad[ao]/,
       /no (puedo|tengo tiempo) (ahorita|ahora|en este momento)/,
-      /me puede[s]? (llamar|marcar) (después|luego|más tarde|en una hora|en un rato|mañana)/,
-      /llám[ae]me (después|luego|más tarde|mañana)/,
+      /me puede[n|s]? (llamar|marcar|contactar) (después|luego|más tarde|en una hora|en un rato|mañana|otro día|otra vez)/,
+      /pueden (llamarme|contactarme|marcarme) (después|luego|más tarde|mañana|otro día)/,
+      /llám[ae]me (después|luego|más tarde|mañana|otro día|en un rato)/,
+      /llámenme (después|luego|más tarde|mañana)/,
+      /me (llamen|llaman|contacten|marquen) (después|luego|más tarde|mañana|otro día)/,
       /estoy (en el )?trabaj(o|ando)/,
       /estoy manejando/,
       /no es buen momento/,
       /no puedo hablar (ahorita|ahora|en este momento)/,
       /estoy en (una )?reuni[oó]n/,
-      /llame.*más tarde|llámeme.*más tarde/,
+      /llame.*más tarde|llámeme.*más tarde|llámenme.*después/,
+      /después (me|nos) (llaman|llame|contactan|marcan)/,
+      /al rato (me|nos) (llaman|llame|contactan)/,
+      /no (tengo|puedo|estoy) (disponible|libre) (ahora|ahorita|en este momento)/,
+      /estoy ocupado|estoy ocupada/,
+      /no tengo tiempo (ahora|ahorita|en este momento|para esto)/,
+      /después hablamos|después les llamo|después los llamo/,
+      /en otro momento/,
+      /no me (moleste|molesten|llame|llamen) (ahora|ahorita|más)/,
     ];
     const clientWantedToLeave = droppedPatterns.some((p) => p.test(lower));
 
@@ -615,11 +626,26 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
 
     if (parsed.general) {
       for (const key of keysToForceNA) {
-        if (parsed.general[key] && !parsed.general[key].na && !parsed.general[key].cumple) {
-          // Solo forzar N/A si Gemini lo marcó como "no cumple"
-          // Si ya cumple, el agente lo logró antes del corte
-          parsed.general[key].na = true;
-          parsed.general[key].observacion = 'N/A — llamada cortada prematuramente, el agente no tuvo oportunidad';
+        if (parsed.general[key] && !parsed.general[key].na) {
+          if (!parsed.general[key].cumple) {
+            // No cumple → definitivamente N/A: el agente no tuvo oportunidad
+            parsed.general[key].na = true;
+            parsed.general[key].observacion = 'N/A — llamada cortada prematuramente, el agente no tuvo oportunidad de completar este criterio';
+          } else if (clientWantedToLeave) {
+            // Cliente pidió explícitamente terminar la llamada → aunque Gemini dijo "cumple",
+            // si el agente apenas alcanzó a iniciar el criterio antes del corte, forzar N/A
+            // para no penalizar ni inflar artificialmente. Solo aplica a criterios de fases finales.
+            const LATE_STAGE_CRITERIA = new Set([
+              'cierre_experiencia', 'requisitos', 'cotizacion_ingresos', 'explicacion_cierre',
+              'cierre_efectivo', 'complementar_dental_vision',
+              'cierre_comercial', 'convenios_bancarios',
+              'reformulacion', 'cierre_llamada',
+            ]);
+            if (LATE_STAGE_CRITERIA.has(key)) {
+              parsed.general[key].na = true;
+              parsed.general[key].observacion = 'N/A — el cliente solicitó ser contactado después y cortó la llamada; el agente no tuvo oportunidad real de completar esta fase';
+            }
+          }
         }
       }
     }
