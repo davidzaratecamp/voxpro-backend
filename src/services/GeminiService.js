@@ -575,10 +575,14 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
 
     if (!clientWantedToLeave && !callEndedAbruptly) return;
 
-    // Verificar despedida normal en la última línea del cliente
-    const lastClientLine = [...lines].reverse().find((l) => /^Cliente:/i.test(l));
-    const hadNormalGoodbye = farewell.test(lastClientLine?.toLowerCase() || '');
-    if (hadNormalGoodbye) return;
+    // Si el cliente avisó explícitamente que estaba ocupado, no cancelar por despedida cortés.
+    // Un cliente puede decir "estoy trabajando, llámame mañana... bye bye" — el corte es real
+    // aunque se despida con educación. Solo cancelar si NO hubo señal de estar ocupado.
+    if (!clientWantedToLeave) {
+      const lastClientLine = [...lines].reverse().find((l) => /^Cliente:/i.test(l));
+      const hadNormalGoodbye = farewell.test(lastClientLine?.toLowerCase() || '');
+      if (hadNormalGoodbye) return;
+    }
 
     logger.info(
       `Llamada cortada detectada (${callEndedAbruptly ? 'corte abrupto' : 'cliente ocupado'}), ` +
