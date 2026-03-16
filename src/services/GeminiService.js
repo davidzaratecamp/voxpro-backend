@@ -183,11 +183,17 @@ class GeminiService {
    */
   _buildPrompt(criteria) {
     const generalList = criteria.general
-      .map((c) => `  - "${c.key}" (${c.label}): peso ${c.weight}%`)
+      .map((c) => {
+        const desc = c.description?.trim() ? `\n    → ${c.description}` : '';
+        return `  - "${c.key}" (${c.label}): peso ${c.weight}%${desc}`;
+      })
       .join('\n');
 
     const hiList = criteria.highImpact
-      .map((c) => `  - "${c.key}" (${c.label})`)
+      .map((c) => {
+        const desc = c.description?.trim() ? `\n    → ${c.description}` : '';
+        return `  - "${c.key}" (${c.label})${desc}`;
+      })
       .join('\n');
 
     const specialBlock = (() => {
