@@ -53,7 +53,18 @@ class CriteriaService {
       general:             parse(row.general_criteria),
       highImpact:          parse(row.high_impact_criteria),
       naRules:             parse(row.na_rules),
-      specialInstructions: row.special_instructions || null,
+      specialInstructions: (() => {
+        const si = row.special_instructions;
+        if (!si) return [];
+        try {
+          const parsed = JSON.parse(si);
+          if (Array.isArray(parsed)) return parsed;
+          // backwards compat: plain text → wrap en una sección
+          return [{ title: 'General', body: si }];
+        } catch {
+          return [{ title: 'General', body: si }];
+        }
+      })(),
       updatedBy:           row.updated_by,
       updatedAt:           row.updated_at,
     };

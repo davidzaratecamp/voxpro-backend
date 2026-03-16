@@ -190,9 +190,16 @@ class GeminiService {
       .map((c) => `  - "${c.key}" (${c.label})`)
       .join('\n');
 
-    const specialBlock = criteria.specialInstructions
-      ? `## INSTRUCCIONES ADICIONALES\n${criteria.specialInstructions}`
-      : '';
+    const specialBlock = (() => {
+      const si = criteria.specialInstructions;
+      if (!si || si.length === 0) return '';
+      if (Array.isArray(si)) {
+        const items = si.filter((s) => s.body?.trim());
+        if (items.length === 0) return '';
+        return `## INSTRUCCIONES ADICIONALES\n${items.map((s) => `### ${s.title}\n${s.body}`).join('\n\n')}`;
+      }
+      return `## INSTRUCCIONES ADICIONALES\n${si}`;
+    })();
 
     const sections = [
       SECTION_ROLE_DEFINITION,
