@@ -411,18 +411,6 @@ class ScannerService {
    * Enriquece grabaciones que aún no tienen datos de agente.
    * Consulta cada servidor Aware vía túnel SSH por Kraken.
    */
-  /**
-   * Elimina grabaciones que no fueron seleccionadas para auditoría.
-   * Conserva solo las que tienen una audit_selection asociada.
-   */
-  async cleanupUnselected() {
-    const result = await db('recordings')
-      .whereNotIn('id', db('audit_selections').select('recording_id'))
-      .del();
-
-    logger.info(`Limpieza: ${result} grabaciones no seleccionadas eliminadas`);
-    return { deleted: result };
-  }
 
   async _enrichNewRecordings() {
     // Obtener grabaciones sin enriquecer, agrupadas por fuente
