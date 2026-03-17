@@ -3,10 +3,7 @@ const db = require('../database/connection');
 const asyncHandler = require('../middleware/asyncHandler');
 
 const VALID_ROLES = [
-  'auditor_obama',
-  'auditor_claro',
-  'auditor_lv',
-  'coordinator_obama',
+  'coordinator',
   'supervisor_calidad',
   'gestor_usuarios',
 ];
