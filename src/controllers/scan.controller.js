@@ -58,9 +58,9 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
     .whereNotNull('r.agent_id')
     .where('r.agent_id', '!=', '-1')
     .whereIn('c.code', clientCodes)
-    .groupBy('r.agent_id', 'r.agent_name')
-    .select('r.agent_id', 'r.agent_name', db.raw('COUNT(*) as recording_count'))
-    .orderBy('r.agent_name');
+    .groupBy('r.agent_id')
+    .select('r.agent_id', db.raw('MAX(r.agent_name) as agent_name'), db.raw('COUNT(*) as recording_count'))
+    .orderBy('agent_name');
 
   if (agentIds) agentsQuery.whereIn('r.agent_id', agentIds);
 
@@ -102,8 +102,8 @@ exports.weekAgents = asyncHandler(async (req, res) => {
     .whereNotNull('r.agent_id')
     .where('r.agent_id', '!=', '-1')
     .whereIn('c.code', clientCodes)
-    .groupBy('r.file_date', 'r.agent_id', 'r.agent_name')
-    .select('r.file_date', 'r.agent_id', 'r.agent_name', db.raw('COUNT(*) as recording_count'));
+    .groupBy('r.file_date', 'r.agent_id')
+    .select('r.file_date', 'r.agent_id', db.raw('MAX(r.agent_name) as agent_name'), db.raw('COUNT(*) as recording_count'));
 
   if (agentIds) agentsQuery.whereIn('r.agent_id', agentIds);
 
