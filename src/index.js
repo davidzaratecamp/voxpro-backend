@@ -16,9 +16,11 @@ async function start() {
   }
 
   // Iniciar servidor HTTP
-  app.listen(config.port, () => {
+  // Timeout extendido (10 min) para análisis de grabaciones largas con Gemini
+  const server = app.listen(config.port, () => {
     logger.info(`VoxPro API corriendo en puerto ${config.port} [${config.env}]`);
   });
+  server.timeout = 10 * 60 * 1000;
 }
 
 // Shutdown limpio
