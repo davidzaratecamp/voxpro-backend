@@ -526,6 +526,12 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
       /no (tenemos|tengo) (ni |ningún |los )?(documentos|papeles|docs)/,
       /no (tenemos|tengo) (documentos|papeles) (para|que)/,
       /no (podemos|puedo) (hacer|proceder|continuar) (nada|algo así|con eso)/,
+      // Cliente ya renovó / ya se atendió con otra agencia
+      /ya (la |lo )?(renov[eéó]|pagué|pag[uú]é|hice|firm[eé]|tramit[eé])/,
+      /ya (renovamos|pagamos|hicimos|firmamos|tramitamos)/,
+      /ya (me |nos )?(atendieron|ayudaron|hicieron|renovaron)/,
+      /ya (está|están) (renovad[ao]|pagad[ao]|list[ao]|hech[ao])/,
+      /ya (lo |la )?tengo (list[ao]|hech[ao]|renovad[ao]|pagad[ao])/,
     ];
 
     const clientLines = lines.filter((l) => /^Cliente:/i.test(l));
