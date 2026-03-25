@@ -104,12 +104,12 @@ class GeminiService {
     logger.info(`Subiendo audio a Gemini File API (${sizeKB} KB) para ${criteria.label}`);
 
     // Subir el audio como archivo (evita las restricciones de inlineData en producción)
-    const tmpPath = path.join(os.tmpdir(), `vxpro_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.wav`);
+    const tmpPath = path.join(os.tmpdir(), `vxpro_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.mp3`);
     let uploadedFileName = null;
     try {
       fs.writeFileSync(tmpPath, audioBuffer);
       const uploadResponse = await this.fileManager.uploadFile(tmpPath, {
-        mimeType: 'audio/wav',
+        mimeType: 'audio/mpeg',
         displayName: `voxpro_audio_${Date.now()}`,
       });
       uploadedFileName = uploadResponse.file.name;

@@ -46,21 +46,23 @@ class AnalysisService {
       await sftp.disconnect();
     }
 
-    // 2b. Convertir audio a 16kHz mono PCM (reduce tamaño y mejora compatibilidad con Gemini)
+    // 2b. Convertir audio a MP3 mono 32kbps (drastically reduces size for Gemini upload)
+    // 90-min call: ~1.65 GB WAV → ~21 MB MP3 (80x smaller, Gemini supports audio/mpeg)
     const tmpInput = path.join(os.tmpdir(), `vxpro_in_${Date.now()}.wav`);
-    const tmpOutput = path.join(os.tmpdir(), `vxpro_out_${Date.now()}.wav`);
+    const tmpOutput = path.join(os.tmpdir(), `vxpro_out_${Date.now()}.mp3`);
     let audioBuffer;
     try {
       fs.writeFileSync(tmpInput, rawBuffer);
       await execFileAsync('ffmpeg', [
         '-y', '-i', tmpInput,
-        '-acodec', 'pcm_s16le',
-        '-ar', '16000',
+        '-acodec', 'libmp3lame',
+        '-b:a', '32k',
+        '-ar', '22050',
         '-ac', '1',
         tmpOutput,
       ]);
       audioBuffer = fs.readFileSync(tmpOutput);
-      logger.info(`Audio convertido: ${(audioBuffer.length / 1024).toFixed(0)} KB (era ${(rawBuffer.length / 1024).toFixed(0)} KB)`);
+      logger.info(`Audio convertido a MP3: ${(audioBuffer.length / 1024).toFixed(0)} KB (era ${(rawBuffer.length / 1024).toFixed(0)} KB)`);
     } finally {
       try { fs.unlinkSync(tmpInput); } catch {}
       try { fs.unlinkSync(tmpOutput); } catch {}
