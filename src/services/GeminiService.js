@@ -537,22 +537,9 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
       }
     }
 
-    // Proteger ítems de alto impacto que requieren cooperación del cliente.
-    // Estos dependen de la campaña — se mantienen hardcodeados usando criteria.key.
-    const HIGH_IMPACT_PROTECTED_ON_REJECTION = {
-      obama_ventas:   ['validacion_requisitos', 'recapitulacion_venta', 'pregunta_taxes'],
-      obama_customer: ['no_gestion_recuperacion', 'recapitulacion'],
-      lv_ventas:      ['no_recapitulacion', 'tipificacion_crm'],
-      lv_customer:    [],
-      claro_tyt:      [],
-      claro_hogar:    [],
-      claro_wcb:      [],
-    };
-
-    const protectedHighImpact = HIGH_IMPACT_PROTECTED_ON_REJECTION[criteria.key] || [];
-
+    // Proteger ítems de alto impacto configurados por el supervisor en el grupo rejection
     if (parsed.high_impact) {
-      for (const key of protectedHighImpact) {
+      for (const key of rejectionKeys) {
         if (parsed.high_impact[key] && !parsed.high_impact[key].cumple) {
           parsed.high_impact[key].cumple = true;
           parsed.high_impact[key].observacion =
