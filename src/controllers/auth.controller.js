@@ -1,5 +1,6 @@
 const AuthService = require('../services/AuthService');
 const asyncHandler = require('../middleware/asyncHandler');
+const db = require('../database/connection');
 
 exports.login = asyncHandler(async (req, res) => {
   const { username, password } = req.body;
@@ -23,5 +24,18 @@ exports.login = asyncHandler(async (req, res) => {
 });
 
 exports.me = asyncHandler(async (req, res) => {
-  res.json({ data: req.user });
+  const user = await db('users')
+    .where({ id: req.user.id, active: true })
+    .select('id', 'username', 'name', 'role', 'client_codes')
+    .first();
+
+  if (!user) {
+    return res.status(401).json({ error: true, message: 'Usuario no encontrado' });
+  }
+
+  const clientCodes = typeof user.client_codes === 'string'
+    ? JSON.parse(user.client_codes)
+    : user.client_codes;
+
+  res.json({ data: { ...user, client_codes: clientCodes } });
 });
