@@ -144,13 +144,14 @@ exports.update = asyncHandler(async (req, res) => {
 exports.agentAudits = asyncHandler(async (req, res) => {
   const { agentId } = req.params;
   const { client } = req.query;
-  const { client_codes: clientCodes, id: userId } = req.user;
+  const { client_codes: clientCodes, id: userId, role } = req.user;
 
   if (!client) {
     return res.status(400).json({ error: true, message: 'Parámetro client requerido' });
   }
 
-  const audits = await AuditService.getAgentAudits(agentId, client, { clientCodes, userId });
+  const filterUserId = role === 'supervisor_calidad' ? null : userId;
+  const audits = await AuditService.getAgentAudits(agentId, client, { clientCodes, userId: filterUserId });
   res.json({ data: audits, count: audits.length });
 });
 
