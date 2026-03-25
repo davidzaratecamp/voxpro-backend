@@ -23,7 +23,7 @@ function checkAccess(selection, req) {
   if (!req.user.client_codes.includes(selection.client_code)) {
     return { status: 403, body: { error: true, message: 'Acceso no autorizado' } };
   }
-  if (selection.auditor_id !== null && selection.auditor_id !== req.user.id) {
+  if (req.user.role !== 'supervisor_calidad' && selection.auditor_id !== null && selection.auditor_id !== req.user.id) {
     return { status: 403, body: { error: true, message: 'Acceso no autorizado' } };
   }
   return null;

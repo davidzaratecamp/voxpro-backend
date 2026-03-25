@@ -427,28 +427,30 @@ class AuditService {
    * @param {{ client?: string, clientCodes?: string[], userId?: number }} filters
    */
   async agentsPerformance({ client, clientCodes, userId } = {}) {
-    const query = db('audit_selections')
+    const query = db('audit_selections as a')
+      .leftJoin('users as u', 'u.id', 'a.auditor_id')
       .select(
-        'agent_id',
-        db.raw('MAX(agent_name) as agent_name'),
-        'client_code',
+        'a.agent_id',
+        db.raw('MAX(a.agent_name) as agent_name'),
+        'a.client_code',
         db.raw('COUNT(*) as total_audits'),
-        db.raw("SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed"),
-        db.raw("SUM(CASE WHEN status = 'in_review' THEN 1 ELSE 0 END) as in_review"),
-        db.raw("SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END) as skipped"),
-        db.raw("ROUND(AVG(CASE WHEN status = 'completed' THEN score END), 1) as avg_score"),
-        db.raw("MIN(CASE WHEN status = 'completed' THEN score END) as min_score"),
-        db.raw("MAX(CASE WHEN status = 'completed' THEN score END) as max_score"),
-        db.raw('MAX(week_start) as last_audit_week')
+        db.raw("SUM(CASE WHEN a.status = 'completed' THEN 1 ELSE 0 END) as completed"),
+        db.raw("SUM(CASE WHEN a.status = 'in_review' THEN 1 ELSE 0 END) as in_review"),
+        db.raw("SUM(CASE WHEN a.status = 'skipped' THEN 1 ELSE 0 END) as skipped"),
+        db.raw("ROUND(AVG(CASE WHEN a.status = 'completed' THEN a.score END), 1) as avg_score"),
+        db.raw("MIN(CASE WHEN a.status = 'completed' THEN a.score END) as min_score"),
+        db.raw("MAX(CASE WHEN a.status = 'completed' THEN a.score END) as max_score"),
+        db.raw('MAX(a.week_start) as last_audit_week'),
+        db.raw('MAX(u.name) as auditor_name')
       )
-      .groupBy('agent_id', 'client_code')
+      .groupBy('a.agent_id', 'a.client_code')
       .orderBy('avg_score', 'asc');
 
     if (clientCodes && clientCodes.length) {
-      query.whereIn('client_code', clientCodes);
+      query.whereIn('a.client_code', clientCodes);
     }
-    if (userId) query.where('auditor_id', userId);
-    if (client) query.where('client_code', client);
+    if (userId) query.where('a.auditor_id', userId);
+    if (client) query.where('a.client_code', client);
 
     return query;
   }
