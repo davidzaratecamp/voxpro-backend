@@ -309,6 +309,9 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
     // Post-procesamiento: forzar N/A en criterios no verificables por audio
     this._applyUnverifiableOverride(parsed, criteria);
 
+    // Post-procesamiento: aplicar grupos N/A personalizados definidos por el supervisor
+    this._applyCustomGroupOverrides(parsed, criteria);
+
     // Post-procesamiento: detectar groserías del agente → forzar maltrato_cliente = no cumple
     this._applyProfanityOverride(parsed);
 
@@ -596,6 +599,25 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
       if (parsed.general?.[key] && !parsed.general[key].na && !parsed.general[key].cumple) {
         parsed.general[key].na = true;
         parsed.general[key].observacion = msg;
+      }
+    }
+  }
+
+  /**
+   * Aplica grupos N/A personalizados definidos por el supervisor en Configuración.
+   * Cada grupo custom actúa como un override siempre activo sobre sus keys.
+   */
+  _applyCustomGroupOverrides(parsed, criteria) {
+    const customGroups = criteria.naRules?._custom_groups || [];
+    if (customGroups.length === 0) return;
+
+    for (const group of customGroups) {
+      const keys = criteria.naRules[group.key] || [];
+      for (const key of keys) {
+        if (parsed.general?.[key] && !parsed.general[key].na) {
+          parsed.general[key].na = true;
+          parsed.general[key].observacion = `N/A — ${group.label}`;
+        }
       }
     }
   }
