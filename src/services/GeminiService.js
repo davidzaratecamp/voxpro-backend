@@ -717,10 +717,9 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
       const na = result?.na ?? false;
       const cumple = na ? false : (result?.cumple ?? false);
 
-      if (!na) {
-        applicableWeight += item.weight;
-        if (cumple) earnedWeight += item.weight;
-      }
+      // Los ítems N/A cuentan como cumplidos — no penalizan al agente
+      applicableWeight += item.weight;
+      if (cumple || na) earnedWeight += item.weight;
 
       generalResults.push({
         key: item.key,
