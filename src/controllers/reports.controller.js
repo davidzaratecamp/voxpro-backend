@@ -48,10 +48,16 @@ const agentRanking = asyncHandler(async (req, res) => {
   res.json({ data });
 });
 
+const scoreByAuditor = asyncHandler(async (req, res) => {
+  const opts = extractParams(req);
+  const data = await ReportsService.getScoreByAuditor(opts);
+  res.json({ data });
+});
+
 const exportData = asyncHandler(async (req, res) => {
   const opts = extractParams(req);
   const data = await ReportsService.getExportData(opts);
   res.json({ data });
 });
 
-module.exports = { kpis, weeklyTrend, scoreByClient, failingCriteria, statusDistribution, agentRanking, exportData };
+module.exports = { kpis, weeklyTrend, scoreByClient, scoreByAuditor, failingCriteria, statusDistribution, agentRanking, exportData };

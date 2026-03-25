@@ -257,6 +257,36 @@ class ReportsService {
     return result.sort((a, b) => a.avg_score - b.avg_score);
   }
 
+  async getScoreByAuditor({ period = '4w', customFrom, customTo, clientCodes }) {
+    const { dateFrom, dateTo } = this._resolveDateRange(period, customFrom, customTo);
+
+    let query = db('audit_selections as a')
+      .join('recordings as r', 'r.id', 'a.recording_id')
+      .join('users as u', 'u.id', 'a.auditor_id')
+      .where('a.status', 'completed')
+      .whereBetween('r.file_date', [dateFrom, dateTo])
+      .groupBy('a.auditor_id', 'u.name')
+      .select(
+        'a.auditor_id',
+        'u.name as auditor_name',
+        db.raw('ROUND(AVG(NULLIF(a.score, 0)), 1) as avg_score'),
+        db.raw('COUNT(*) as total')
+      )
+      .orderBy('avg_score', 'asc');
+
+    if (clientCodes && clientCodes.length > 0) {
+      query = query.whereIn('a.client_code', clientCodes);
+    }
+
+    const rows = await query;
+    return rows.map((r) => ({
+      auditor_id: r.auditor_id,
+      auditor_name: r.auditor_name,
+      avg_score: Number(r.avg_score),
+      total: Number(r.total),
+    }));
+  }
+
   async getExportData(opts) {
     const [kpis, ranking, failingCriteria, statusDist] = await Promise.all([
       this.getKPIs(opts),
