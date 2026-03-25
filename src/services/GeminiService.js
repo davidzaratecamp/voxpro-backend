@@ -466,17 +466,29 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
     const closureKeys = new Set(criteria.naRules?.dropped_call || []);
     if (closureKeys.size === 0) return;
 
+    const msg = clientWantedToLeave
+      ? 'N/A — el cliente solicitó ser contactado después y cortó la llamada; el agente no tuvo oportunidad real de completar esta fase'
+      : 'N/A — llamada cortada prematuramente, el agente no tuvo oportunidad de completar este criterio';
+
+    // Criterios generales
     if (parsed.general) {
       for (const key of closureKeys) {
         if (parsed.general[key] && !parsed.general[key].na) {
-          if (!parsed.general[key].cumple) {
+          if (!parsed.general[key].cumple || clientWantedToLeave) {
             parsed.general[key].na = true;
-            parsed.general[key].observacion = 'N/A — llamada cortada prematuramente, el agente no tuvo oportunidad de completar este criterio';
-          } else if (clientWantedToLeave) {
-            // Cliente pidió terminar la llamada → forzar N/A en criterios de cierre incluso si Gemini dijo cumple
-            parsed.general[key].na = true;
-            parsed.general[key].observacion = 'N/A — el cliente solicitó ser contactado después y cortó la llamada; el agente no tuvo oportunidad real de completar esta fase';
+            parsed.general[key].observacion = msg;
           }
+        }
+      }
+    }
+
+    // Ítems de alto impacto — protege los que el supervisor haya incluido en el grupo dropped_call
+    if (parsed.high_impact) {
+      for (const key of closureKeys) {
+        if (parsed.high_impact[key] && !parsed.high_impact[key].cumple) {
+          parsed.high_impact[key].cumple = true;
+          parsed.high_impact[key].observacion =
+            'PROTEGIDO — llamada cortada prematuramente; el agente no tuvo oportunidad de completar este ítem, no es atribuible a su gestión';
         }
       }
     }
