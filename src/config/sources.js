@@ -70,7 +70,7 @@ const AWARE_SOURCES = [
 
   // Claro WCB - esquema diferente
   {
-    folder: 'AWARE_34',
+    folder: 'AWARE_34CCM',
     clientCode: 'claro_wcb',
     clientName: 'Claro WCB',
     db: { host: '10.255.255.34', database: 'awareccm', user: group2User, password: group2Pass, port: 5432 },
