@@ -114,11 +114,12 @@ class GeminiService {
       });
       uploadedFileName = uploadResponse.file.name;
       const fileUri = uploadResponse.file.uri;
-      logger.info(`Audio subido: ${uploadedFileName}`);
+      const storedMimeType = uploadResponse.file.mimeType || 'audio/mpeg';
+      logger.info(`Audio subido: ${uploadedFileName} (${storedMimeType})`);
 
       return await this._retryWithBackoff(async () => {
         const result = await this.model.generateContent([
-          { fileData: { mimeType: 'audio/wav', fileUri } },
+          { fileData: { mimeType: storedMimeType, fileUri } },
           { text: prompt },
         ]);
         const response = result.response.text();
