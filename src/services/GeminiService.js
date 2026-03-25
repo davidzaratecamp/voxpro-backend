@@ -514,6 +514,14 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
       /no (lo |la )?voy a tomar/,
       /no (me |nos )?interesa (para nada|en absoluto|el servicio|el seguro|la póliza)/,
       /retire.*de.*lista|no (me )?llam(e|en) (más|nunca)/,
+      // Cliente ya tiene seguro y no quiere cambiarlo
+      /ya tengo (seguro|póliza|cobertura)/,
+      /tengo (mi |un )?(seguro|póliza|cobertura) (por|con|a través de|de) (mi |el )?(empleador|trabajo|empresa)/,
+      /me lo cancelan (si|porque|entonces)/,
+      /me (cancelan|quitarían|quitan) (el |mi )?(seguro|póliza|cobertura)/,
+      /no (quiero|voy a) cambiar(lo|la|me)? de (seguro|póliza|cobertura)/,
+      /estoy bien (con|así|como estoy)/,
+      /ya estoy (afiliado|cubierto|asegurado)/,
     ];
 
     const clientLines = lines.filter((l) => /^Cliente:/i.test(l));
