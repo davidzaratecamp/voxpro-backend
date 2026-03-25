@@ -105,6 +105,18 @@ NUNCA marques "no cumple" en Manejo de Objeciones si el cliente no hizo ninguna 
 El criterio "Uso de Herramientas" evalúa si el agente utiliza correctamente sus herramientas internas (CRM, sistemas de gestión, bases de datos). Como el uso de herramientas ocurre en el computador del agente y NO es audible en la grabación, este criterio debe marcarse como "na" salvo que el audio proporcione evidencia explícita (ej: el agente lee en voz alta datos del sistema, consulta información en pantalla de forma audible, o comete un error de información verificable por herramienta).
 Si no hay evidencia audible del uso de herramientas, marca "na". NUNCA marques "no cumple" por ausencia de evidencia: la ausencia de evidencia no es evidencia de incumplimiento.
 
+### Regla de Pivot a Plan Dental/Visual/Suplementario:
+Si el cliente ya tiene seguro médico principal (Medicare, seguro del empleador, etc.) y el agente pivota ofreciendo un plan dental, visual o suplementario, eso ES una oferta comercial válida y completa. En ese caso:
+- "Oferta comercial y explicación del servicio" → CUMPLE si el agente intentó ofrecer el plan alternativo.
+- "Doble oferta de póliza" → evalúa si el agente presentó opciones dentro del plan dental/visual, no sobre el plan principal que ya tiene el cliente.
+- Si el cliente aceptó escuchar el plan alternativo, la llamada es "normal" y el agente debe ser evaluado por la gestión completa.
+
+### Regla de Grabación Incompleta (CRÍTICO):
+Si el transcript termina con el agente en espera/hold ("espérame un momento", "dame un minuto", "ya vuelvo contigo") o a mitad de una frase sin despedida, la llamada está INCOMPLETA — la grabación se cortó antes de que terminara la llamada real. En ese caso:
+- Establece call_situation según el contexto de la llamada hasta ese punto (rejection, dropped_call, normal).
+- NO penalices ítems que el agente habría completado después del corte: referidos, recapitulación, cierre de venta, documentación — todos deben marcarse como cumple ya que no hubo oportunidad de evaluarlos.
+- El agente NO debe ser penalizado por lo que no se grabó.
+
 ### Regla de Despedida en Llamada Cortada:
 Si la llamada fue cortada prematuramente — ya sea porque el cliente dijo que estaba ocupado, o porque la grabación termina abruptamente sin despedida — el criterio "Despedida" debe marcarse como "na". El agente NO puede despedirse de alguien que ya colgó o de una llamada que se cortó antes de que llegara a ese momento.
 
