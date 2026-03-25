@@ -508,7 +508,7 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
       /no (lo |la )?quiero/,
       /no (lo |la )?necesito/,
       /no gracias.*no/,
-      /no quiero (nada|ningún|ninguna|saber nada)/,
+      /no (quiero|queremos) (nada|ningún|ninguna|saber nada)/,
       /no (me |nos )?hace falta/,
       /no (me |nos )?sirve/,
       /no (lo |la )?voy a tomar/,
@@ -522,6 +522,10 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
       /no (quiero|voy a) cambiar(lo|la|me)? de (seguro|póliza|cobertura)/,
       /estoy bien (con|así|como estoy)/,
       /ya estoy (afiliado|cubierto|asegurado)/,
+      // Cliente no tiene documentos / no puede proceder
+      /no (tenemos|tengo) (ni |ningún |los )?(documentos|papeles|docs)/,
+      /no (tenemos|tengo) (documentos|papeles) (para|que)/,
+      /no (podemos|puedo) (hacer|proceder|continuar) (nada|algo así|con eso)/,
     ];
 
     const clientLines = lines.filter((l) => /^Cliente:/i.test(l));
