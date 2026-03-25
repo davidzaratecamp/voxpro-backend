@@ -87,11 +87,12 @@ exports.selectOne = asyncHandler(async (req, res) => {
 
 exports.list = asyncHandler(async (req, res) => {
   const { week_start, client, status, date, campaign } = req.query;
-  const { client_codes: clientCodes, id: userId } = req.user;
+  const { client_codes: clientCodes, id: userId, role } = req.user;
+  const filterUserId = role === 'supervisor_calidad' ? null : userId;
 
   let selections = await AuditService.getWeekSelections(
     week_start || null,
-    { client, status, clientCodes, date, userId }
+    { client, status, clientCodes, date, userId: filterUserId }
   );
 
   if (campaign) {
@@ -155,8 +156,10 @@ exports.agentAudits = asyncHandler(async (req, res) => {
 
 exports.agentsPerformance = asyncHandler(async (req, res) => {
   const { client } = req.query;
-  const { client_codes: clientCodes, id: userId } = req.user;
-  const agents = await AuditService.agentsPerformance({ client, clientCodes, userId });
+  const { client_codes: clientCodes, id: userId, role } = req.user;
+  // El supervisor ve todos los agentes de todos los auditores; el coordinador solo los suyos
+  const filterUserId = role === 'supervisor_calidad' ? null : userId;
+  const agents = await AuditService.agentsPerformance({ client, clientCodes, userId: filterUserId });
   res.json({ data: agents, count: agents.length });
 });
 
@@ -257,7 +260,8 @@ exports.streamAudio = asyncHandler(async (req, res) => {
 });
 
 exports.summary = asyncHandler(async (req, res) => {
-  const { client_codes: clientCodes, id: userId } = req.user;
-  const result = await AuditService.summary(clientCodes, userId);
+  const { client_codes: clientCodes, id: userId, role } = req.user;
+  const filterUserId = role === 'supervisor_calidad' ? null : userId;
+  const result = await AuditService.summary(clientCodes, filterUserId);
   res.json({ data: result });
 });
