@@ -121,7 +121,27 @@ Señales claras de grabación ininteligible:
 IMPORTANTE: Solo usa \`call_unintelligible: true\` cuando la incoherencia se debe a FALLO TÉCNICO de la grabación, NO cuando el agente simplemente gestionó mal o la llamada fue corta pero comprensible. Si puedes evaluar la gestión del agente aunque sea parcialmente, evalúa normalmente.`;
 
 const SECTION_SCORE_CALC = `### Cálculo del puntaje:
-El puntaje se calcula SOLO con los criterios que aplican (excluyendo los "na"). Los pesos se redistribuyen proporcionalmente entre los criterios aplicables.`;
+El puntaje se calcula con todos los criterios generales. Los criterios marcados "na" cuentan automáticamente como cumplidos (no penalizan al agente). Solo los criterios marcados explícitamente como "no cumple" reducen el puntaje.`;
+
+const SECTION_CALL_SITUATION = `### Campo call_situation (OBLIGATORIO — evalúa esto PRIMERO):
+Antes de evaluar cualquier criterio, determina el tipo de situación de la llamada. Este campo es crítico para que el sistema aplique las protecciones automáticas correctas.
+
+Valores posibles:
+- **"normal"**: Llamada regular donde el cliente estuvo disponible y receptivo. El agente pudo gestionar (aunque no haya cerrado venta).
+- **"rejection"**: El cliente rechazó el servicio o no pudo/quiso proceder. Incluye cualquiera de estos casos:
+  - "No me interesa", "No lo necesito", "No quiero nada", "No gracias"
+  - Ya tiene seguro con otra empresa y no quiere cambiarlo
+  - Ya renovó la póliza recientemente con otra agencia
+  - No tiene documentos / no puede inscribirse por restricciones migratorias
+  - Quiere cancelar / salir del plan actual
+  - Cualquier forma de rechazo que impidió al agente completar el proceso
+- **"dropped_call"**: La llamada terminó antes de que el agente pudiera gestionar, SIN rechazo del servicio. Incluye:
+  - Cliente ocupado, en el trabajo, en reunión — pidió que lo llamaran después
+  - Grabación se corta abruptamente sin despedida normal
+  - Cliente colgó sin dar razón clara
+- **"third_party"**: La persona que contestó NO es el titular de la cuenta (familiar, hijo/a, esposo/a, compañero).
+
+En caso de duda entre "rejection" y "dropped_call": si el cliente expresó desinterés → "rejection"; si era solo falta de tiempo → "dropped_call".`;
 
 module.exports = {
   SECTION_ROLE_DEFINITION,
@@ -133,4 +153,5 @@ module.exports = {
   SECTION_THIRD_PARTY_RULE,
   SECTION_ADDITIONAL_RULES,
   SECTION_SCORE_CALC,
+  SECTION_CALL_SITUATION,
 };

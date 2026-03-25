@@ -17,6 +17,7 @@ const {
   SECTION_THIRD_PARTY_RULE,
   SECTION_ADDITIONAL_RULES,
   SECTION_SCORE_CALC,
+  SECTION_CALL_SITUATION,
 } = require('../config/promptSections');
 
 /**
@@ -220,6 +221,7 @@ class GeminiService {
       SECTION_THIRD_PARTY_RULE,
       SECTION_ADDITIONAL_RULES,
       SECTION_SCORE_CALC,
+      SECTION_CALL_SITUATION,
       specialBlock,
       this._buildResponseFormat(criteria),
     ].filter(Boolean);
@@ -236,6 +238,7 @@ Responde EXCLUSIVAMENTE en JSON válido con esta estructura exacta (sin markdown
 
 {
   "call_unintelligible": false,
+  "call_situation": "normal",
   "transcription": "Agente: ... \\nCliente: ... \\n...",
   "general": {
 ${criteria.general.map((item) => `    "${item.key}": { "cumple": true, "na": false, "observacion": "breve justificación", "cita": "", "timestamp": 0 }`).join(',\n')}
@@ -294,17 +297,8 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
       };
     }
 
-    // Post-procesamiento: detectar tercero y forzar N/A en criterios del titular
-    this._applyThirdPartyOverride(parsed, criteria);
-
-    // Post-procesamiento: detectar llamada cortada y forzar N/A en criterios de cierre
-    this._applyDroppedCallOverride(parsed, criteria);
-
-    // Post-procesamiento: detectar rechazo explícito del cliente y forzar N/A en fases no alcanzadas
-    this._applyRejectionOverride(parsed, criteria);
-
-    // Post-procesamiento: forzar N/A en manejo_objeciones si no hubo objeción
-    this._applyNoObjectionOverride(parsed, criteria);
+    // Post-procesamiento: aplicar protecciones según el tipo de llamada evaluado por Gemini
+    this._applySituationOverride(parsed, criteria);
 
     // Post-procesamiento: forzar N/A en criterios no verificables por audio
     this._applyUnverifiableOverride(parsed, criteria);
@@ -362,10 +356,58 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
   }
 
   /**
-   * Detecta si la llamada fue atendida por un tercero (no el titular)
-   * y fuerza N/A en los criterios que dependen de hablar con el titular.
-   * Usa criteria.naRules.third_party desde la DB.
+   * Aplica protecciones N/A según el tipo de llamada que Gemini identificó en call_situation.
+   * Reemplaza los detectores basados en regex por el juicio contextual de Gemini.
    */
+  _applySituationOverride(parsed, criteria) {
+    const situation = parsed.call_situation;
+    if (!situation || situation === 'normal') return;
+
+    let keys = new Set();
+    let msgGeneral = '';
+    let msgHighImpact = '';
+
+    if (situation === 'rejection') {
+      keys = new Set(criteria.naRules?.rejection || []);
+      msgGeneral = 'N/A — el cliente rechazó el servicio; el agente no tuvo oportunidad de completar esta fase';
+      msgHighImpact = 'PROTEGIDO — el cliente rechazó el servicio antes de que el agente pudiera completar este ítem; no es una falta atribuible al agente';
+    } else if (situation === 'dropped_call') {
+      keys = new Set(criteria.naRules?.dropped_call || []);
+      msgGeneral = 'N/A — llamada cortada prematuramente; el agente no tuvo oportunidad de completar esta fase';
+      msgHighImpact = 'PROTEGIDO — llamada cortada prematuramente; el agente no tuvo oportunidad de completar este ítem, no es atribuible a su gestión';
+    } else if (situation === 'third_party') {
+      keys = new Set(criteria.naRules?.third_party || []);
+      msgGeneral = 'N/A — llamada atendida por tercero, no el titular';
+      msgHighImpact = 'PROTEGIDO — llamada atendida por tercero; el agente no pudo gestionar con el titular';
+    }
+
+    if (keys.size === 0) {
+      logger.info(`call_situation=${situation} pero no hay keys configuradas en naRules`);
+      return;
+    }
+
+    logger.info(`call_situation=${situation}, aplicando protecciones sobre ${keys.size} keys`);
+
+    if (parsed.general) {
+      for (const key of keys) {
+        if (parsed.general[key] && !parsed.general[key].na && !parsed.general[key].cumple) {
+          parsed.general[key].na = true;
+          parsed.general[key].observacion = msgGeneral;
+        }
+      }
+    }
+
+    if (parsed.high_impact) {
+      for (const key of keys) {
+        if (parsed.high_impact[key] && !parsed.high_impact[key].cumple) {
+          parsed.high_impact[key].cumple = true;
+          parsed.high_impact[key].observacion = msgHighImpact;
+        }
+      }
+    }
+  }
+
+  // DEPRECATED — kept temporarily for reference, not called
   _applyThirdPartyOverride(parsed, criteria) {
     const transcription = (parsed.transcription || '').toLowerCase();
 
@@ -608,6 +650,7 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
       'N/A — el cliente no presentó ninguna objeción durante la llamada, no hay nada que manejar';
     logger.info('No se detectó objeción del cliente, forzando N/A en manejo_objeciones');
   }
+  // END DEPRECATED FUNCTIONS
 
   /**
    * Fuerza N/A en criterios que son inherentemente no verificables por audio.
