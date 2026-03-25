@@ -444,7 +444,7 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
     const clientWantedToLeave = droppedPatterns.some((p) => p.test(clientLines));
 
     // --- Detección 2: corte abrupto — no hay despedida y el agente habla al final ---
-    const farewell = /gracias|hasta luego|chao|adiós|bye|que (le |te )?vaya bien|fue un placer|con mucho gusto/;
+    const farewell = /hasta luego|chao|adiós|bye|que (le |te )?vaya bien|fue un placer|con mucho gusto|muchas gracias|muy amable|igualmente|buenas noches|buen (día|provecho)/;
     const lastFiveLines = lines.slice(-5).join(' ').toLowerCase();
     const hadAnyFarewell = farewell.test(lastFiveLines);
     const lastLine = lines[lines.length - 1] || '';
@@ -514,6 +514,11 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
       /no (lo |la )?voy a tomar/,
       /no (me |nos )?interesa (para nada|en absoluto|el servicio|el seguro|la póliza)/,
       /retire.*de.*lista|no (me )?llam(e|en) (más|nunca)/,
+      // Cliente quiere cancelar / salir del plan
+      /me gustaría salir (del|de) (plan|seguro|póliza)/,
+      /(quiero|quisiera) salir (del|de) (plan|seguro|póliza)/,
+      /quiero cancelar (el|mi|la) (plan|seguro|póliza)/,
+      /me gustaría cancelar/,
       // Cliente ya tiene seguro y no quiere cambiarlo
       /ya tengo (seguro|póliza|cobertura)/,
       /tengo (mi |un )?(seguro|póliza|cobertura) (por|con|a través de|de) (mi |el )?(empleador|trabajo|empresa)/,
