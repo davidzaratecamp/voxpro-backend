@@ -94,11 +94,14 @@ class AwareDBService {
 
         // Búsqueda por call_id numérico (Obama y otros proyectos con call_id real)
         if (numericIds.length > 0) {
+          const anexoFilter = sourceConfig.filterByAnexos?.length
+            ? `AND rl.anexo = ANY($3::text[])`
+            : '';
           const query = `
             SELECT rl.call_id::text AS call_id,
                    rl.agente_id::text AS agent_id,
                    e.empleado_name AS agent_name,
-                   e.empleado_ext AS agent_extension,
+                   COALESCE(e.empleado_ext, rl.anexo) AS agent_extension,
                    rl.call_time AS call_duration,
                    rl.uniqueid,
                    rl.proyecto_id
@@ -106,8 +109,12 @@ class AwareDBService {
             LEFT JOIN empleado e ON rl.agente_id = e.empleado_rut
             WHERE rl.call_id = ANY($1::int[])
               AND rl.registro_llamada_fecha = ANY($2::date[])
+              ${anexoFilter}
           `;
-          const result = await pgClient.query(query, [numericIds, dates]);
+          const params = sourceConfig.filterByAnexos?.length
+            ? [numericIds, dates, sourceConfig.filterByAnexos]
+            : [numericIds, dates];
+          const result = await pgClient.query(query, params);
 
           for (const row of result.rows) {
             agentMap.set(String(row.call_id), this._formatAgent(row));
@@ -119,11 +126,14 @@ class AwareDBService {
 
         // Búsqueda por uniqueid dot-notation (LV y otros proyectos con call_id=0)
         if (dotIds.length > 0) {
+          const anexoFilter = sourceConfig.filterByAnexos?.length
+            ? `AND rl.anexo = ANY($3::text[])`
+            : '';
           const query = `
             SELECT rl.uniqueid AS call_id,
                    rl.agente_id::text AS agent_id,
                    e.empleado_name AS agent_name,
-                   e.empleado_ext AS agent_extension,
+                   COALESCE(e.empleado_ext, rl.anexo) AS agent_extension,
                    rl.call_time AS call_duration,
                    rl.uniqueid,
                    rl.proyecto_id
@@ -131,8 +141,12 @@ class AwareDBService {
             LEFT JOIN empleado e ON rl.agente_id = e.empleado_rut
             WHERE rl.uniqueid = ANY($1::text[])
               AND rl.registro_llamada_fecha = ANY($2::date[])
+              ${anexoFilter}
           `;
-          const result = await pgClient.query(query, [dotIds, dates]);
+          const params = sourceConfig.filterByAnexos?.length
+            ? [dotIds, dates, sourceConfig.filterByAnexos]
+            : [dotIds, dates];
+          const result = await pgClient.query(query, params);
 
           for (const row of result.rows) {
             agentMap.set(String(row.call_id), this._formatAgent(row));

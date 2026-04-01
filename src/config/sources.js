@@ -76,6 +76,16 @@ const AWARE_SOURCES = [
     db: { host: '10.255.255.34', database: 'awareccm', user: group2User, password: group2Pass, port: 5432 },
     schema: 'awareccm', // usuario + time_speaking
   },
+
+  // Reclutamiento - AWARE_6 compartido, filtrado por anexo de cada reclutadora
+  {
+    folder: 'AWARE_6',
+    clientCode: 'reclutamiento',
+    clientName: 'Reclutamiento',
+    db: { host: '10.255.255.6', database: 'aware', user: group1User, password: group1Pass, port: 5432 },
+    schema: 'standard',
+    filterByAnexos: ['4002', '4007', '4012', '4016'],
+  },
 ];
 
 module.exports = AWARE_SOURCES;

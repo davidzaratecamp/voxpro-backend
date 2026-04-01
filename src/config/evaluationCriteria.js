@@ -209,6 +209,28 @@ const CRITERIA = {
     ],
   },
 
+  // ─── Reclutamiento ───────────────────────────────────────────
+  reclutamiento: {
+    label: 'Reclutamiento',
+    general: [
+      { key: 'presentacion',              label: 'Presentación (saludo, nombre del reclutador y empresa)',                          weight: 10 },
+      { key: 'descripcion_vacante',       label: 'Descripción clara de la vacante y funciones del cargo',                          weight: 15 },
+      { key: 'verificacion_perfil',       label: 'Verificación del perfil del candidato (experiencia, disponibilidad, estudios)',   weight: 15 },
+      { key: 'condiciones_laborales',     label: 'Información de condiciones laborales (salario, horario, tipo de contrato)',       weight: 15 },
+      { key: 'manejo_objeciones',         label: 'Manejo de dudas y objeciones del candidato',                                     weight: 10 },
+      { key: 'escucha_activa',            label: 'Escucha activa y comunicación efectiva',                                         weight: 10 },
+      { key: 'pasos_siguientes',          label: 'Cierre con pasos siguientes claros (próxima etapa, fecha, lugar)',                weight: 15 },
+      { key: 'amabilidad_empatia',        label: 'Amabilidad y trato respetuoso con el candidato',                                 weight: 10 },
+    ],
+    highImpact: [
+      { key: 'informacion_falsa',         label: 'Brindar información falsa o engañosa sobre la vacante o la empresa' },
+      { key: 'maltrato_candidato',        label: 'Maltrato o trato irrespetuoso al candidato' },
+      { key: 'cuelgue_llamada',           label: 'Cuelgue abrupto de la llamada' },
+      { key: 'no_verificacion_identidad', label: 'No verificar nombre y disponibilidad del candidato' },
+      { key: 'no_pasos_siguientes',       label: 'No indicar los pasos siguientes del proceso de selección' },
+    ],
+  },
+
   // ─── LV (Vital Health) Ventas ────────────────────────────────
   lv_ventas: {
     label: 'LV Ventas',
@@ -282,6 +304,9 @@ function getCriteria(clientCode, agentId, proyectoId) {
       return CRITERIA.lv_customer;
     }
     return CRITERIA.lv_ventas;
+  }
+  if (clientCode === 'reclutamiento') {
+    return CRITERIA.reclutamiento;
   }
   return CRITERIA[clientCode] || null;
 }
