@@ -24,7 +24,7 @@ exports.seed = async function (knex) {
         username: sup.username,
         password_hash: hash,
         name: sup.name,
-        role: 'auditor_reclutamiento',
+        role: 'supervisor_calidad',
         client_codes: JSON.stringify(['reclutamiento']),
         agent_ids: null,
         agent_names: null,
@@ -33,7 +33,7 @@ exports.seed = async function (knex) {
       console.log(`✓ Creado: ${sup.name} (supervisora)`);
     } else {
       await knex('users').where('username', sup.username).update({
-        role: 'auditor_reclutamiento',
+        role: 'supervisor_calidad',
         client_codes: JSON.stringify(['reclutamiento']),
         agent_ids: null,
         agent_names: null,
