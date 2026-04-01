@@ -43,14 +43,7 @@ const AWARE_SOURCES = [
     schema: 'standard',
   },
 
-  // Claro TYT - Inbound (AWARE_8) y Outbound (AWARE_7, agentes Jenny/Fabian/Nicole)
-  {
-    folder: 'AWARE_7',
-    clientCode: 'claro_tyt',
-    clientName: 'Claro TYT',
-    db: { host: '10.255.255.7', database: 'awareccm', user: group3User, password: group3Pass, port: 5432 },
-    schema: 'awareccm',
-  },
+  // Claro TYT - migrado completamente a AWARE_8
   {
     folder: 'AWARE_8',
     clientCode: 'claro_tyt',
