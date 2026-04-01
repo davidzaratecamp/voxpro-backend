@@ -60,6 +60,7 @@ const CLIENT_GROUPS = {
   obama_customer: 'obama',
   lv_customer:    'lv',
   lv_ventas:      'lv',
+  reclutamiento:  'reclutamiento',
 };
 
 exports.seed = async function (knex) {
