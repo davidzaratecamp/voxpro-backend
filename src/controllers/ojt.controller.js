@@ -27,7 +27,7 @@ exports.list = asyncHandler(async (req, res) => {
       'o.cedula',
       'o.client_code',
       'o.aware_source_id',
-      's.folder as aware_folder',
+      's.folder_name as aware_folder',
       'o.status',
       'o.fecha_ingreso',
       'o.fecha_graduacion',
@@ -63,7 +63,7 @@ exports.getById = asyncHandler(async (req, res) => {
     .where('o.id', id)
     .select(
       'o.*',
-      's.folder as aware_folder',
+      's.folder_name as aware_folder',
       'u.name as formador_name'
     )
     .first();
@@ -93,6 +93,20 @@ exports.create = asyncHandler(async (req, res) => {
   const formadorId = role === 'gestor_usuarios'
     ? (req.body.formador_id || userId)
     : userId;
+
+  // El formador solo puede usar client_codes que tiene autorizados
+  if (role === 'formador') {
+    const formadorRow = await db('users').where('id', formadorId).select('client_codes').first();
+    const allowed = typeof formadorRow.client_codes === 'string'
+      ? JSON.parse(formadorRow.client_codes)
+      : formadorRow.client_codes;
+    if (!allowed.includes(client_code)) {
+      return res.status(403).json({
+        error: true,
+        message: `No tienes autorización para registrar agentes del cliente: ${client_code}`,
+      });
+    }
+  }
 
   // Verificar que el aware_source_id existe
   const source = await db('aware_sources').where('id', aware_source_id).first();
@@ -168,8 +182,8 @@ exports.update = asyncHandler(async (req, res) => {
 exports.awareSources = asyncHandler(async (req, res) => {
   const sources = await db('aware_sources as s')
     .join('clients as c', 's.client_id', 'c.id')
-    .select('s.id', 's.folder', 'c.name as client_name', 'c.code as client_code')
-    .orderBy('s.folder');
+    .select('s.id', 's.folder_name', 'c.name as client_name', 'c.code as client_code')
+    .orderBy('s.folder_name');
 
   res.json({ data: sources });
 });

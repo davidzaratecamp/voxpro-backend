@@ -4,11 +4,13 @@ const asyncHandler = require('../middleware/asyncHandler');
 function extractParams(req) {
   const { period = '4w', date_from, date_to, client } = req.query;
   const clientCodes = client ? [client] : req.user.client_codes;
+  const auditorId = req.user.role === 'supervisor_calidad' ? null : req.user.id;
   return {
     period,
     customFrom: date_from || null,
     customTo: date_to || null,
     clientCodes,
+    auditorId,
   };
 }
 

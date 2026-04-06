@@ -34,6 +34,19 @@ exports.triggerScanSync = asyncHandler(async (req, res) => {
   res.json({ message: 'Escaneo completado', data: result });
 });
 
+async function resolveAgentIds(userId) {
+  const userRow = await db('users').where('id', userId).select('agent_ids', 'role').first();
+  if (userRow?.role === 'formador') {
+    const ojtAgents = await db('ojt_agents')
+      .where({ formador_id: userId, status: 'activo' })
+      .select('cedula');
+    return ojtAgents.length > 0 ? ojtAgents.map((a) => a.cedula) : [];
+  }
+  return userRow?.agent_ids
+    ? (typeof userRow.agent_ids === 'string' ? JSON.parse(userRow.agent_ids) : userRow.agent_ids)
+    : null;
+}
+
 exports.scanAndSelect = asyncHandler(async (req, res) => {
   const { date } = req.body;
 
@@ -44,11 +57,8 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
   yesterday.setDate(yesterday.getDate() - 1);
   const selectDate = date || yesterday.toISOString().slice(0, 10);
 
-  // 2. Devolver lista de agentes con grabaciones ese día (filtrada por coordinador)
-  const userRow = await db('users').where('id', req.user.id).select('agent_ids').first();
-  const agentIds = userRow?.agent_ids
-    ? (typeof userRow.agent_ids === 'string' ? JSON.parse(userRow.agent_ids) : userRow.agent_ids)
-    : null;
+  // 2. Devolver lista de agentes con grabaciones ese día (filtrada por coordinador/formador)
+  const agentIds = await resolveAgentIds(req.user.id);
   const clientCodes = req.user.client_codes || [];
 
   const agentsQuery = db('recordings as r')
@@ -75,11 +85,7 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
 exports.weekAgents = asyncHandler(async (req, res) => {
   const { week_start } = req.query;
   const clientCodes = req.user.client_codes || [];
-
-  const userRow = await db('users').where('id', req.user.id).select('agent_ids').first();
-  const agentIds = userRow?.agent_ids
-    ? (typeof userRow.agent_ids === 'string' ? JSON.parse(userRow.agent_ids) : userRow.agent_ids)
-    : null;
+  const agentIds = await resolveAgentIds(req.user.id);
 
   // Calcular los 7 días de la semana
   const start = week_start ? new Date(week_start + 'T00:00:00') : (() => {

@@ -34,7 +34,7 @@ class ReportsService {
     return { dateFrom, dateTo };
   }
 
-  async getKPIs({ period = '4w', customFrom, customTo, clientCodes }) {
+  async getKPIs({ period = '4w', customFrom, customTo, clientCodes, auditorId }) {
     const { dateFrom, dateTo } = this._resolveDateRange(period, customFrom, customTo);
 
     let query = db('audit_selections as a')
@@ -45,6 +45,7 @@ class ReportsService {
     if (clientCodes && clientCodes.length > 0) {
       query = query.whereIn('a.client_code', clientCodes);
     }
+    if (auditorId) query = query.where('a.auditor_id', auditorId);
 
     const [row] = await query.select(
       db.raw(`COUNT(CASE WHEN a.status = 'completed' THEN 1 END) as total_completed`),
@@ -61,7 +62,7 @@ class ReportsService {
     };
   }
 
-  async getWeeklyTrend({ clientCodes }) {
+  async getWeeklyTrend({ clientCodes, auditorId }) {
     // Get last 12 distinct week_start values
     let weekQuery = db('audit_selections')
       .distinct('week_start')
@@ -71,6 +72,7 @@ class ReportsService {
     if (clientCodes && clientCodes.length > 0) {
       weekQuery = weekQuery.whereIn('client_code', clientCodes);
     }
+    if (auditorId) weekQuery = weekQuery.where('auditor_id', auditorId);
 
     const weekRows = await weekQuery;
     if (weekRows.length === 0) return [];
@@ -93,6 +95,7 @@ class ReportsService {
     if (clientCodes && clientCodes.length > 0) {
       trendQuery = trendQuery.whereIn('a.client_code', clientCodes);
     }
+    if (auditorId) trendQuery = trendQuery.where('a.auditor_id', auditorId);
 
     const rows = await trendQuery;
     return rows.map((r) => ({
@@ -103,7 +106,7 @@ class ReportsService {
     }));
   }
 
-  async getScoreByClient({ period = '4w', customFrom, customTo, clientCodes }) {
+  async getScoreByClient({ period = '4w', customFrom, customTo, clientCodes, auditorId }) {
     const { dateFrom, dateTo } = this._resolveDateRange(period, customFrom, customTo);
 
     let query = db('audit_selections as a')
@@ -121,6 +124,7 @@ class ReportsService {
     if (clientCodes && clientCodes.length > 0) {
       query = query.whereIn('a.client_code', clientCodes);
     }
+    if (auditorId) query = query.where('a.auditor_id', auditorId);
 
     const rows = await query;
     return rows.map((r) => ({
@@ -130,7 +134,7 @@ class ReportsService {
     }));
   }
 
-  async getFailingCriteria({ period = '4w', customFrom, customTo, clientCodes }) {
+  async getFailingCriteria({ period = '4w', customFrom, customTo, clientCodes, auditorId }) {
     const { dateFrom, dateTo } = this._resolveDateRange(period, customFrom, customTo);
 
     let query = db('audit_selections as a')
@@ -143,6 +147,7 @@ class ReportsService {
     if (clientCodes && clientCodes.length > 0) {
       query = query.whereIn('a.client_code', clientCodes);
     }
+    if (auditorId) query = query.where('a.auditor_id', auditorId);
 
     const rows = await query;
 
@@ -171,7 +176,7 @@ class ReportsService {
       .slice(0, 10);
   }
 
-  async getStatusDistribution({ period = '4w', customFrom, customTo, clientCodes }) {
+  async getStatusDistribution({ period = '4w', customFrom, customTo, clientCodes, auditorId }) {
     const { dateFrom, dateTo } = this._resolveDateRange(period, customFrom, customTo);
 
     let query = db('audit_selections as a')
@@ -183,12 +188,13 @@ class ReportsService {
     if (clientCodes && clientCodes.length > 0) {
       query = query.whereIn('a.client_code', clientCodes);
     }
+    if (auditorId) query = query.where('a.auditor_id', auditorId);
 
     const rows = await query;
     return rows.map((r) => ({ status: r.status, count: Number(r.count) }));
   }
 
-  async getAgentRanking({ period = '4w', customFrom, customTo, clientCodes }) {
+  async getAgentRanking({ period = '4w', customFrom, customTo, clientCodes, auditorId }) {
     const { dateFrom, dateTo } = this._resolveDateRange(period, customFrom, customTo);
 
     // Calculate prior period with same duration
@@ -220,6 +226,7 @@ class ReportsService {
       if (clientCodes && clientCodes.length > 0) {
         q = q.whereIn('a.client_code', clientCodes);
       }
+      if (auditorId) q = q.where('a.auditor_id', auditorId);
       return q;
     };
 
@@ -257,7 +264,7 @@ class ReportsService {
     return result.sort((a, b) => a.avg_score - b.avg_score);
   }
 
-  async getScoreByAuditor({ period = '4w', customFrom, customTo, clientCodes }) {
+  async getScoreByAuditor({ period = '4w', customFrom, customTo, clientCodes, auditorId }) {
     const { dateFrom, dateTo } = this._resolveDateRange(period, customFrom, customTo);
 
     let query = db('audit_selections as a')
@@ -277,6 +284,7 @@ class ReportsService {
     if (clientCodes && clientCodes.length > 0) {
       query = query.whereIn('a.client_code', clientCodes);
     }
+    if (auditorId) query = query.where('a.auditor_id', auditorId);
 
     const rows = await query;
     return rows.map((r) => ({
