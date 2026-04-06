@@ -108,8 +108,8 @@ exports.weekAgents = asyncHandler(async (req, res) => {
     .whereNotNull('r.agent_id')
     .where('r.agent_id', '!=', '-1')
     .whereIn('c.code', clientCodes)
-    .groupBy('r.file_date', 'r.agent_id')
-    .select('r.file_date', 'r.agent_id', db.raw('MAX(r.agent_name) as agent_name'), db.raw('COUNT(*) as recording_count'));
+    .groupBy('r.file_date', 'r.agent_id', 'c.code')
+    .select('r.file_date', 'r.agent_id', 'c.code as client_code', db.raw('MAX(r.agent_name) as agent_name'), db.raw('COUNT(*) as recording_count'));
 
   if (agentIds) agentsQuery.whereIn('r.agent_id', agentIds);
 
@@ -125,6 +125,7 @@ exports.weekAgents = asyncHandler(async (req, res) => {
     byDate[date].push({
       agent_id: row.agent_id,
       agent_name: row.agent_name,
+      client_code: row.client_code,
       recording_count: Number(row.recording_count),
     });
   }
