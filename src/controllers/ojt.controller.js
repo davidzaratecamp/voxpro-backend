@@ -88,6 +88,12 @@ exports.create = asyncHandler(async (req, res) => {
       message: 'nombre_completo, cedula, aware_source_id, client_code y fecha_ingreso son requeridos',
     });
   }
+  if (!/^\d+$/.test(String(cedula).trim())) {
+    return res.status(400).json({
+      error: true,
+      message: 'La cédula solo puede contener dígitos numéricos',
+    });
+  }
 
   // El formador solo puede registrar agentes para sí mismo
   const formadorId = role === 'gestor_usuarios'
