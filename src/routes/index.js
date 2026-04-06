@@ -10,6 +10,7 @@ router.use('/audit', auth, require('./audit.routes'));
 router.use('/reports', auth, require('./reports.routes'));
 router.use('/criteria', auth, require('./criteria.routes'));
 router.use('/users', auth, require('./users.routes'));
+router.use('/ojt', auth, require('./ojt.routes'));
 
 // Health check
 router.get('/health', (req, res) => {

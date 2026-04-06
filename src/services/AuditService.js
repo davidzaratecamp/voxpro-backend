@@ -55,11 +55,22 @@ class AuditService {
     const workDayIndex = targetDay === 0 ? 6 : targetDay;
     const remainingDays = 7 - workDayIndex;
 
-    // Filtro de agentes asignados a este coordinador por cédula (null = sin restricción)
-    const userRow = await db('users').where('id', userId).select('agent_ids').first();
-    const agentIds = userRow?.agent_ids
-      ? (typeof userRow.agent_ids === 'string' ? JSON.parse(userRow.agent_ids) : userRow.agent_ids)
-      : null;
+    // Filtro de agentes asignados a este coordinador/formador por cédula (null = sin restricción)
+    const userRow = await db('users').where('id', userId).select('agent_ids', 'role').first();
+
+    let agentIds = null;
+
+    if (userRow?.role === 'formador') {
+      // Formadores: leer cédulas desde ojt_agents (solo activos)
+      const ojtAgents = await db('ojt_agents')
+        .where({ formador_id: userId, status: 'activo' })
+        .select('cedula');
+      agentIds = ojtAgents.length > 0 ? ojtAgents.map((a) => a.cedula) : [];
+    } else {
+      agentIds = userRow?.agent_ids
+        ? (typeof userRow.agent_ids === 'string' ? JSON.parse(userRow.agent_ids) : userRow.agent_ids)
+        : null;
+    }
 
     // Agentes totales por cliente (toda la semana, para calcular proporciones)
     const weekAgentsQuery = db('recordings as r')

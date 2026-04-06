@@ -4,6 +4,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 
 const VALID_ROLES = [
   'coordinator',
+  'formador',
   'supervisor_calidad',
   'gestor_usuarios',
 ];
