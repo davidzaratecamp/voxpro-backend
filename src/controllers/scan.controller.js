@@ -6,9 +6,9 @@ const AwareDBService = require('../services/AwareDBService');
 const AWARE_SOURCES = require('../config/sources');
 
 const WCB_SUBCAMPAIGN_IDS = {
-  hogar: [9, 14, 20, 21, 23, 44],
-  movil: [24, 43],
-  pymes: [36, 37, 39, 42, 45],
+  hogar: [21, 22, 23, 27, 41, 44],
+  movil: [24, 25, 26, 28, 40, 43],
+  pymes: [36, 37, 38, 39, 42, 45],
 };
 
 exports.triggerScan = asyncHandler(async (req, res) => {
