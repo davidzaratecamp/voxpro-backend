@@ -4,6 +4,11 @@ const { LV_PROYECTO_IDS, LV_CUSTOMER_PROYECTO, OBAMA_CUSTOMER_AGENTS } = require
 // Duración mínima en segundos para seleccionar llamadas
 const LV_MIN_DURATION = 60;
 
+// Claro WCB sub-campaigns by proyecto_id
+const WCB_HOGAR_IDS = new Set([9, 14, 20, 21, 23, 44]);
+const WCB_MOVIL_IDS = new Set([24, 43]);
+const WCB_PYMES_IDS = new Set([36, 37, 39, 42, 45]);
+
 // Máximo de selecciones por agente por semana (por auditor)
 const MAX_PER_AGENT = 2;
 
@@ -309,6 +314,11 @@ class AuditService {
     }
     if (clientCode === 'lv') {
       return proyectoId === LV_CUSTOMER_PROYECTO ? 'customer' : 'ventas';
+    }
+    if (clientCode === 'claro_wcb' && proyectoId != null) {
+      if (WCB_HOGAR_IDS.has(proyectoId)) return 'hogar';
+      if (WCB_MOVIL_IDS.has(proyectoId)) return 'movil';
+      if (WCB_PYMES_IDS.has(proyectoId)) return 'pymes';
     }
     return null;
   }

@@ -5,6 +5,12 @@ const db = require('../database/connection');
 const AwareDBService = require('../services/AwareDBService');
 const AWARE_SOURCES = require('../config/sources');
 
+const WCB_SUBCAMPAIGN_IDS = {
+  hogar: [9, 14, 20, 21, 23, 44],
+  movil: [24, 43],
+  pymes: [36, 37, 39, 42, 45],
+};
+
 exports.triggerScan = asyncHandler(async (req, res) => {
   const { date, full_scan } = req.body;
 
@@ -83,7 +89,7 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
 });
 
 exports.weekAgents = asyncHandler(async (req, res) => {
-  const { week_start } = req.query;
+  const { week_start, subcampaign } = req.query;
   const clientCodes = req.user.client_codes || [];
   const agentIds = await resolveAgentIds(req.user.id);
 
@@ -112,6 +118,9 @@ exports.weekAgents = asyncHandler(async (req, res) => {
     .select('r.file_date', 'r.agent_id', 'c.code as client_code', db.raw('MAX(r.agent_name) as agent_name'), db.raw('COUNT(*) as recording_count'));
 
   if (agentIds) agentsQuery.whereIn('r.agent_id', agentIds);
+  if (subcampaign && WCB_SUBCAMPAIGN_IDS[subcampaign]) {
+    agentsQuery.whereIn('r.proyecto_id', WCB_SUBCAMPAIGN_IDS[subcampaign]);
+  }
 
   const rows = await agentsQuery;
 

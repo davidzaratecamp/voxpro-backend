@@ -69,7 +69,8 @@ class AwareDBService {
                  rl.agente_id AS agent_id,
                  u.user_fullname AS agent_name,
                  u.extension AS agent_extension,
-                 rl.time_speaking AS call_duration
+                 rl.time_speaking AS call_duration,
+                 rl.proyecto_id
           FROM registro_llamada rl
           LEFT JOIN usuario u ON rl.agente_id = u.user_id
           WHERE rl.call_id::text = ANY($1::text[])
