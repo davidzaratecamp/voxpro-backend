@@ -7,6 +7,7 @@ const VALID_ROLES = [
   'formador',
   'supervisor_calidad',
   'gestor_usuarios',
+  'coordinador_avaya',
 ];
 
 const VALID_CLIENT_CODES = ['obama', 'claro_wcb', 'claro_hogar', 'claro_tyt', 'lv'];

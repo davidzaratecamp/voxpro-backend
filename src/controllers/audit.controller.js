@@ -229,11 +229,15 @@ exports.streamAudio = asyncHandler(async (req, res) => {
   const tmpOutput = path.join(tmpDir, `voxpro_out_${Date.now()}.wav`);
 
   try {
-    await sftp.connect();
-    const audioBuffer = await sftp.getFile(selection.file_path);
-    await sftp.disconnect();
-
-    fs.writeFileSync(tmpInput, audioBuffer);
+    // Archivos locales (Avaya) vs remotos (SFTP/Aware)
+    if (fs.existsSync(selection.file_path)) {
+      fs.copyFileSync(selection.file_path, tmpInput);
+    } else {
+      await sftp.connect();
+      const audioBuffer = await sftp.getFile(selection.file_path);
+      await sftp.disconnect();
+      fs.writeFileSync(tmpInput, audioBuffer);
+    }
     await execFileAsync('ffmpeg', [
       '-y', '-i', tmpInput,
       '-acodec', 'pcm_s16le',
@@ -252,7 +256,9 @@ exports.streamAudio = asyncHandler(async (req, res) => {
     });
     res.send(converted);
   } catch (err) {
-    await sftp.disconnect().catch(() => {});
+    if (!fs.existsSync(selection.file_path)) {
+      await sftp.disconnect().catch(() => {});
+    }
     throw err;
   } finally {
     try { fs.unlinkSync(tmpInput); } catch {}
