@@ -87,30 +87,30 @@ class GeminiService {
    * @param {number} [proyectoId] - ID del proyecto en Aware (para LV: distingue Ventas vs Customer)
    * @returns {{ transcription: string, evaluation: object }}
    */
-  async analyzeCall(audioBuffer, clientCode, agentId, proyectoId) {
+  async analyzeCall(audioBuffer, clientCode, agentId, proyectoId, mimeType = 'audio/ogg') {
     const campaignKey = resolveCampaignKey(clientCode, agentId, proyectoId);
     const criteria = await CriteriaService.getByKey(campaignKey);
 
     await this.semaphore.acquire();
     try {
-      return await this._doAnalyzeCall(audioBuffer, criteria);
+      return await this._doAnalyzeCall(audioBuffer, criteria, mimeType);
     } finally {
       this.semaphore.release();
     }
   }
 
-  async _doAnalyzeCall(audioBuffer, criteria) {
+  async _doAnalyzeCall(audioBuffer, criteria, mimeType = 'audio/ogg') {
     const prompt = this._buildPrompt(criteria);
     const sizeKB = (audioBuffer.length / 1024).toFixed(0);
     logger.info(`Subiendo audio a Gemini File API (${sizeKB} KB) para ${criteria.label}`);
 
-    // Subir el audio como archivo (evita las restricciones de inlineData en producción)
-    const tmpPath = path.join(os.tmpdir(), `vxpro_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.wav`);
+    const ext = mimeType === 'audio/ogg' ? 'ogg' : 'wav';
+    const tmpPath = path.join(os.tmpdir(), `vxpro_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`);
     let uploadedFileName = null;
     try {
       fs.writeFileSync(tmpPath, audioBuffer);
       const uploadResponse = await this.fileManager.uploadFile(tmpPath, {
-        mimeType: 'audio/wav',
+        mimeType,
         displayName: `voxpro_audio_${Date.now()}`,
       });
       uploadedFileName = uploadResponse.file.name;
@@ -119,7 +119,7 @@ class GeminiService {
 
       return await this._retryWithBackoff(async () => {
         const result = await this.model.generateContent([
-          { fileData: { mimeType: 'audio/wav', fileUri } },
+          { fileData: { mimeType, fileUri } },
           { text: prompt },
         ]);
         const response = result.response.text();

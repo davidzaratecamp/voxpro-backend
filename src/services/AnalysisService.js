@@ -51,17 +51,20 @@ class AnalysisService {
       }
     }
 
-    // 2b. Convertir audio a 16kHz mono PCM (reduce tamaño y mejora compatibilidad con Gemini)
+    // 2b. Convertir audio a opus (16kHz mono, ~32kbps) — comprime drásticamente el tamaño
+    //     sin perder calidad de voz, evitando timeouts y truncamiento en Gemini.
     const tmpInput = path.join(os.tmpdir(), `vxpro_in_${Date.now()}.wav`);
-    const tmpOutput = path.join(os.tmpdir(), `vxpro_out_${Date.now()}.wav`);
+    const tmpOutput = path.join(os.tmpdir(), `vxpro_out_${Date.now()}.ogg`);
     let audioBuffer;
+    let mimeType = 'audio/ogg';
     try {
       fs.writeFileSync(tmpInput, rawBuffer);
       await execFileAsync('ffmpeg', [
         '-y', '-i', tmpInput,
-        '-acodec', 'pcm_s16le',
+        '-acodec', 'libopus',
         '-ar', '16000',
         '-ac', '1',
+        '-b:a', '32k',
         tmpOutput,
       ]);
       audioBuffer = fs.readFileSync(tmpOutput);
@@ -77,7 +80,8 @@ class AnalysisService {
       audioBuffer,
       selection.client_code,
       selection.agent_id,
-      selection.proyecto_id
+      selection.proyecto_id,
+      mimeType
     );
     logger.info(`Gemini completado en ${Date.now() - tGemini}ms`);
 
