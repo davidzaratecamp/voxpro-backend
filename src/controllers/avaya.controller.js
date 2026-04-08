@@ -118,7 +118,7 @@ exports.uploadRecording = asyncHandler(async (req, res) => {
     return res.status(400).json({ error: true, message: 'No se recibió ningún archivo de audio' });
   }
 
-  const { agent_id, file_date } = req.body;
+  const { agent_id, file_date, customer_number } = req.body;
   if (!agent_id || !file_date) {
     fs.unlinkSync(req.file.path);
     return res.status(400).json({ error: true, message: 'agent_id y file_date son requeridos' });
@@ -160,6 +160,7 @@ exports.uploadRecording = asyncHandler(async (req, res) => {
     file_date,
     agent_id: agent.cedula,
     agent_name: agent.nombre_completo,
+    customer_number: customer_number?.trim() || null,
     agent_enriched: true,
     status: 'pending',
   });
@@ -207,7 +208,8 @@ exports.getRecordings = asyncHandler(async (req, res) => {
       'r.file_name',
       'r.file_date',
       'r.file_size',
-      'r.call_duration'
+      'r.call_duration',
+      'r.customer_number'
     )
     .orderBy('r.file_date', 'desc')
     .orderBy('a.agent_name', 'asc');
