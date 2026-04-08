@@ -31,13 +31,23 @@ exports.upload = multer({
 });
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
-function getWeekStart(dateStr) {
+function getWeekBounds(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
   const ref = new Date(Date.UTC(y, m - 1, d));
   const day = ref.getUTCDay();
   const diff = day === 0 ? 6 : day - 1;
-  ref.setUTCDate(ref.getUTCDate() - diff);
-  return ref.toISOString().slice(0, 10);
+  const monday = new Date(ref);
+  monday.setUTCDate(ref.getUTCDate() - diff);
+  const sunday = new Date(monday);
+  sunday.setUTCDate(monday.getUTCDate() + 6);
+  return {
+    weekStart: monday.toISOString().slice(0, 10),
+    weekEnd: sunday.toISOString().slice(0, 10),
+  };
+}
+
+function getWeekStart(dateStr) {
+  return getWeekBounds(dateStr).weekStart;
 }
 
 // ── Agentes ──────────────────────────────────────────────────────────────────
@@ -136,7 +146,7 @@ exports.uploadRecording = asyncHandler(async (req, res) => {
     return res.status(500).json({ error: true, message: 'Fuente Avaya no configurada para este cliente' });
   }
 
-  const weekStart = getWeekStart(file_date);
+  const { weekStart, weekEnd } = getWeekBounds(file_date);
   const filePath = req.file.path;
   const pathHash = crypto.createHash('sha256').update(filePath).digest('hex');
 
@@ -162,6 +172,7 @@ exports.uploadRecording = asyncHandler(async (req, res) => {
     agent_name: agent.nombre_completo,
     client_code: agent.client_code,
     week_start: weekStart,
+    week_end: weekEnd,
     status: 'selected',
     score: 0,
   });
