@@ -34,16 +34,21 @@ class AnalysisService {
       file: selection.file_name,
     });
 
-    // 2. Descargar audio via SFTP
+    // 2. Obtener audio — local (Avaya) o remoto (SFTP/Aware)
     const t0 = Date.now();
-    const sftp = new SFTPService();
     let rawBuffer;
-    try {
-      await sftp.connect();
-      rawBuffer = await sftp.getFile(selection.file_path);
-      logger.info(`Audio descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
-    } finally {
-      await sftp.disconnect();
+    if (fs.existsSync(selection.file_path)) {
+      rawBuffer = fs.readFileSync(selection.file_path);
+      logger.info(`Audio local leído: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+    } else {
+      const sftp = new SFTPService();
+      try {
+        await sftp.connect();
+        rawBuffer = await sftp.getFile(selection.file_path);
+        logger.info(`Audio descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+      } finally {
+        await sftp.disconnect();
+      }
     }
 
     // 2b. Convertir audio a 16kHz mono PCM (reduce tamaño y mejora compatibilidad con Gemini)
