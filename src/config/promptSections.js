@@ -84,7 +84,27 @@ const SECTION_ADDITIONAL_RULES = `### Regla de Ventas y Gestión Comercial:
 Si el agente agenda una llamada de seguimiento (callback) con fecha y hora específica, eso ES un cierre exitoso de la llamada. Ejemplos:
 - "Te llamo mañana a las 8" → Cierre de fase = CUMPLE, Cierre de venta = CUMPLE o N/A según contexto.
 - "Cuando esté tu esposo presente, nos llamas" → Cierre = CUMPLE.
+- "Te voy a volver la llamada porque se escucha entrecortado" → La llamada es `dropped_call` por audio deficiente. El cierre, despedida y comunicación efectiva son N/A — el agente no puede cerrar ni despedirse de una llamada que tuvo que reiniciar por fallo técnico.
 Un callback demuestra que el agente mantuvo el interés del prospecto y aseguró una segunda oportunidad. Es una técnica de ventas válida y profesional.
+
+### Regla de Comunicación Efectiva con Problemas de Audio Técnicos (CRÍTICO):
+El criterio "Comunicación efectiva" evalúa la habilidad comunicativa DEL AGENTE — su claridad, estructura, escucha activa. NUNCA evalúa la calidad de la red o la conexión telefónica.
+
+Si el audio de la llamada tiene problemas técnicos EXTERNOS al agente (señal entrecortada, eco, ruido de red, conexión inestable) y esto es evidente porque:
+- El agente o el cliente dicen explícitamente "se escucha entrecortado", "no te oigo bien", "se está cortando"
+- El audio tiene saltos o frases interrumpidas por razones técnicas
+
+→ Marca "comunicacion_efectiva" como **"na"**. El agente no controla la calidad de la red. Penalizarlo por eso sería evaluar la infraestructura telefónica, no al agente.
+
+Solo marca "no cumple" en comunicación efectiva cuando el AGENTE habla mal: usa jerga inapropiada, no escucha al cliente, da información confusa o contradictoria — cosas que dependen 100% de él.
+
+### Regla de Manejo de Objeciones — Búsqueda Activa de Alternativas:
+Cuando el cliente hace una pregunta de servicio (no un rechazo adversarial) y el agente:
+1. Investiga activamente opciones (consulta coberturas, verifica transportadoras, busca alternativas)
+2. Comunica con precisión lo que encontró (aunque la respuesta no sea la ideal para el cliente)
+3. Propone soluciones dentro de sus posibilidades
+
+→ Esto ES manejo de objeciones = **CUMPLE**. El agente que busca activamente la mejor opción para el cliente y la comunica con honestidad cumple este criterio, aunque el resultado no sea el que el cliente esperaba (ej: "en Tolimaida no hay cobertura, pero en Nilo sí"). La calidad de la gestión importa, no que el cliente quede 100% satisfecho con la cobertura disponible.
 
 ### Regla de Validación Parcial (CRÍTICO):
 El criterio "Requisitos" evalúa si el AGENTE hizo su trabajo de preguntar y verificar — NO evalúa si el cliente califica o tiene los documentos.
@@ -153,6 +173,7 @@ Valores posibles:
   - Cliente ocupado, en el trabajo, en reunión — pidió que lo llamaran después
   - Grabación se corta abruptamente sin despedida normal
   - Cliente colgó sin dar razón clara
+  - **El audio se deteriora (entrecortado, señal mala) y el AGENTE termina la llamada voluntariamente para volver a marcar** — frases como "te voy a volver la llamada", "la voy a volver a llamar", "se escucha muy entrecortado, te marco de nuevo" indican esto. El agente tomó la decisión correcta de reiniciar la llamada para darle mejor servicio al cliente.
 - **"third_party"**: La persona que contestó NO es el titular de la cuenta (familiar, hijo/a, esposo/a, compañero).
 
 En caso de duda entre "rejection" y "dropped_call": si el cliente expresó desinterés → "rejection"; si era solo falta de tiempo → "dropped_call".`;
