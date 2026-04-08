@@ -84,7 +84,7 @@ const SECTION_ADDITIONAL_RULES = `### Regla de Ventas y Gestión Comercial:
 Si el agente agenda una llamada de seguimiento (callback) con fecha y hora específica, eso ES un cierre exitoso de la llamada. Ejemplos:
 - "Te llamo mañana a las 8" → Cierre de fase = CUMPLE, Cierre de venta = CUMPLE o N/A según contexto.
 - "Cuando esté tu esposo presente, nos llamas" → Cierre = CUMPLE.
-- "Te voy a volver la llamada porque se escucha entrecortado" → La llamada es `dropped_call` por audio deficiente. El cierre, despedida y comunicación efectiva son N/A — el agente no puede cerrar ni despedirse de una llamada que tuvo que reiniciar por fallo técnico.
+- "Te voy a volver la llamada porque se escucha entrecortado" → La llamada es "dropped_call" por audio deficiente. El cierre, despedida y comunicación efectiva son N/A — el agente no puede cerrar ni despedirse de una llamada que tuvo que reiniciar por fallo técnico.
 Un callback demuestra que el agente mantuvo el interés del prospecto y aseguró una segunda oportunidad. Es una técnica de ventas válida y profesional.
 
 ### Regla de Comunicación Efectiva con Problemas de Audio Técnicos (CRÍTICO):
