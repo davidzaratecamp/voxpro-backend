@@ -51,12 +51,14 @@ exports.getAgents = asyncHandler(async (req, res) => {
 
   const agentMap = new Map();
   for (const call of calls) {
-    const key = call.agent_id || 'sin-agente';
+    // Ignorar llamadas sin agente asignado o con IDs inválidos (e.g. -1)
+    if (!call.agent_id || Number(call.agent_id) < 0) continue;
+    const key = call.agent_id;
     if (!agentMap.has(key)) {
       agentMap.set(key, {
-        agent_id:       call.agent_id,
-        agent_name:     call.agent_name,
-        client_code:    call.clientCode,
+        agent_id:        call.agent_id,
+        agent_name:      call.agent_name,
+        client_code:     call.clientCode,
         recording_count: 0,
       });
     }
