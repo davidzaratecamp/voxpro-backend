@@ -64,6 +64,15 @@ function openTunnel(targetHost, targetPort = 5432) {
 }
 
 /**
+ * Convierte un valor de fecha de pg (puede ser Date object o string) a YYYY-MM-DD.
+ */
+function toDateStr(val) {
+  if (!val) return null;
+  if (val instanceof Date) return val.toISOString().slice(0, 10);
+  return String(val).slice(0, 10);
+}
+
+/**
  * Construye la URL de audio para el esquema estándar.
  * Formato: {baseUrl}/{YYYY}/{MM}/{DD}/Q-{phone}-{callId}.WAV
  */
@@ -147,7 +156,7 @@ class RealtimeScanService {
             agent_id:            r.agent_id,
             agent_name:          r.agent_name,
             duration:            r.duration,
-            file_date:           String(r.file_date).slice(0, 10),
+            file_date:           toDateStr(r.file_date),
             proyecto_id:         r.proyecto_id,
             hangup_src:          r.hangup_src,
             audio_url:           `${src.audioBaseUrl}/${r.audiofile}.WAV`,
@@ -193,7 +202,7 @@ class RealtimeScanService {
               agent_id:            r.agent_id,
               agent_name:          r.agent_name,
               duration:            r.duration,
-              file_date:           String(r.file_date).slice(0, 10),
+              file_date:           toDateStr(r.file_date),
               proyecto_id:         r.proyecto_id,
               hangup_src:          null,
               audio_url:           audioUrl,
