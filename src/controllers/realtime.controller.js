@@ -74,7 +74,7 @@ exports.selectCall = asyncHandler(async (req, res) => {
     }
   }
 
-  const { weekStart, weekEnd } = getWeekBounds(call.file_date);
+  const { weekStart, weekEnd } = getWeekBounds(String(call.file_date).slice(0, 10));
 
   await db.transaction(async (trx) => {
     let recordingId;
