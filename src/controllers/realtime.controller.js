@@ -39,6 +39,76 @@ exports.getCalls = asyncHandler(async (req, res) => {
  *
  * Body: { call } — objeto call devuelto por getCalls
  */
+/**
+ * GET /api/realtime/agents?date=YYYY-MM-DD
+ * Devuelve los agentes con llamadas en Aware para esa fecha, agrupados.
+ */
+exports.getAgents = asyncHandler(async (req, res) => {
+  const date = req.query.date || new Date().toISOString().slice(0, 10);
+  const clientCodes = req.user.client_codes || [];
+
+  const calls = await RealtimeScanService.getCalls(date, clientCodes);
+
+  const agentMap = new Map();
+  for (const call of calls) {
+    const key = call.agent_id || 'sin-agente';
+    if (!agentMap.has(key)) {
+      agentMap.set(key, {
+        agent_id:       call.agent_id,
+        agent_name:     call.agent_name,
+        client_code:    call.clientCode,
+        recording_count: 0,
+      });
+    }
+    agentMap.get(key).recording_count++;
+  }
+
+  const agents = Array.from(agentMap.values())
+    .sort((a, b) => (a.agent_name || '').localeCompare(b.agent_name || ''));
+
+  res.json({ data: agents, count: agents.length, date });
+});
+
+/**
+ * GET /api/realtime/agent-calls?agent_id=X&date=YYYY-MM-DD
+ * Devuelve top-20 llamadas >1min del agente, con info de selección si ya existe.
+ */
+exports.getAgentCalls = asyncHandler(async (req, res) => {
+  const { agent_id, date } = req.query;
+  if (!agent_id || !date) {
+    return res.status(400).json({ error: true, message: 'agent_id y date son requeridos' });
+  }
+  const clientCodes = req.user.client_codes || [];
+
+  const calls = await RealtimeScanService.getCallsByAgent(date, agent_id, clientCodes);
+
+  const hashes = calls.map((c) => crypto.createHash('sha256').update(c.audio_url).digest('hex'));
+
+  const existing = await db('recordings as r')
+    .leftJoin('audit_selections as a', function () {
+      this.on('a.recording_id', '=', 'r.id')
+          .andOn('a.auditor_id', '=', db.raw('?', [req.user.id]));
+    })
+    .whereIn('r.file_path_hash', hashes)
+    .select('r.file_path_hash', 'a.id as selection_id', 'a.status as selection_status');
+
+  const existingMap = {};
+  for (const row of existing) {
+    existingMap[row.file_path_hash] = row;
+  }
+
+  const data = calls.map((call, i) => ({
+    id:               null,
+    call_duration:    call.duration,
+    call_phone:       call.call_phone,
+    selection_id:     existingMap[hashes[i]]?.selection_id || null,
+    selection_status: existingMap[hashes[i]]?.selection_status || null,
+    _realtime_call:   call,
+  }));
+
+  res.json({ data, count: data.length });
+});
+
 exports.selectCall = asyncHandler(async (req, res) => {
   const { call } = req.body;
   if (!call?.audio_url || !call?.file_date) {

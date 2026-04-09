@@ -18,6 +18,8 @@ router.use((req, res, next) => {
 });
 
 router.get('/calls', ctrl.getCalls);
+router.get('/agents', ctrl.getAgents);
+router.get('/agent-calls', ctrl.getAgentCalls);
 router.post('/select', ctrl.selectCall);
 
 module.exports = router;
