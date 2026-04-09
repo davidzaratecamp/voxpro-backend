@@ -11,6 +11,16 @@ const WCB_SUBCAMPAIGN_IDS = {
   pymes: [36, 37, 38, 39, 42, 45],
 };
 
+const OBAMA_SUBCAMPAIGN_IDS = {
+  ventas:   [2, 4, 5, 6, 7, 16, 17, 18, 19, 20, 21, 25, 27, 39, 81, 83, 87],
+  customer: [8, 9, 10, 14, 15, 22, 23, 24, 28, 32, 37, 41, 42, 43, 44, 45],
+};
+
+const LV_SUBCAMPAIGN_IDS = {
+  ventas:   [34, 26],       // LV-VENTAS, LV_OUT
+  customer: [35, 33, 36],   // LV_CUSTOMER, INB_LV, LV_COBROS
+};
+
 exports.triggerScan = asyncHandler(async (req, res) => {
   const { date, full_scan } = req.body;
 
@@ -89,7 +99,7 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
 });
 
 exports.weekAgents = asyncHandler(async (req, res) => {
-  const { week_start, subcampaign } = req.query;
+  const { week_start, subcampaign, client } = req.query;
   const clientCodes = req.user.client_codes || [];
   const agentIds = await resolveAgentIds(req.user.id);
 
@@ -118,8 +128,13 @@ exports.weekAgents = asyncHandler(async (req, res) => {
     .select('r.file_date', 'r.agent_id', 'c.code as client_code', db.raw('MAX(r.agent_name) as agent_name'), db.raw('COUNT(*) as recording_count'));
 
   if (agentIds) agentsQuery.whereIn('r.agent_id', agentIds);
-  if (subcampaign && WCB_SUBCAMPAIGN_IDS[subcampaign]) {
-    agentsQuery.whereIn('r.proyecto_id', WCB_SUBCAMPAIGN_IDS[subcampaign]);
+
+  if (subcampaign) {
+    let ids = null;
+    if (client === 'obama') ids = OBAMA_SUBCAMPAIGN_IDS[subcampaign];
+    else if (client === 'lv') ids = LV_SUBCAMPAIGN_IDS[subcampaign];
+    else ids = WCB_SUBCAMPAIGN_IDS[subcampaign]; // claro_wcb or default
+    if (ids) agentsQuery.whereIn('r.proyecto_id', ids);
   }
 
   const rows = await agentsQuery;
