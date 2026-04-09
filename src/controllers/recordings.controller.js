@@ -129,6 +129,34 @@ exports.byAgentPhone = asyncHandler(async (req, res) => {
   res.json({ data: recordings });
 });
 
+exports.byPhone = asyncHandler(async (req, res) => {
+  const { phone } = req.query;
+  if (!phone || phone.trim().length < 7) {
+    return res.status(400).json({ error: true, message: 'Ingresa al menos 7 dígitos' });
+  }
+  const clientCodes = req.user.client_codes || [];
+  const db = require('../database/connection');
+
+  const recordings = await db('recordings as r')
+    .join('aware_sources as s', 'r.aware_source_id', 's.id')
+    .join('clients as c', 's.client_id', 'c.id')
+    .leftJoin('audit_selections as a', function () {
+      this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
+    })
+    .where('r.call_phone', 'like', `%${phone.trim()}%`)
+    .whereIn('c.code', clientCodes)
+    .orderBy('r.file_date', 'desc')
+    .limit(50)
+    .select(
+      'r.id', 'r.file_name', 'r.call_duration',
+      'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
+      'c.code as client_code', 'c.name as client_name',
+      'a.id as selection_id', 'a.status as selection_status'
+    );
+
+  res.json({ data: recordings, count: recordings.length });
+});
+
 exports.getPending = asyncHandler(async (req, res) => {
   const { client, limit } = req.query;
   const recordings = await RecordingService.getPending({
