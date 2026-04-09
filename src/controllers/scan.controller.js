@@ -130,10 +130,16 @@ exports.weekAgents = asyncHandler(async (req, res) => {
   if (agentIds) agentsQuery.whereIn('r.agent_id', agentIds);
 
   if (subcampaign) {
+    // Inferir cliente si no viene explícito (usuario con un solo cliente)
+    const effectiveClient = client || (
+      clientCodes.includes('obama') ? 'obama' :
+      clientCodes.includes('lv')    ? 'lv'    :
+      'claro_wcb'
+    );
     let ids = null;
-    if (client === 'obama') ids = OBAMA_SUBCAMPAIGN_IDS[subcampaign];
-    else if (client === 'lv') ids = LV_SUBCAMPAIGN_IDS[subcampaign];
-    else ids = WCB_SUBCAMPAIGN_IDS[subcampaign]; // claro_wcb or default
+    if (effectiveClient === 'obama') ids = OBAMA_SUBCAMPAIGN_IDS[subcampaign];
+    else if (effectiveClient === 'lv') ids = LV_SUBCAMPAIGN_IDS[subcampaign];
+    else ids = WCB_SUBCAMPAIGN_IDS[subcampaign];
     if (ids) agentsQuery.whereIn('r.proyecto_id', ids);
   }
 
