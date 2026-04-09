@@ -6,6 +6,7 @@ const path = require('path');
 const db = require('../database/connection');
 const SFTPService = require('./SFTPService');
 const GeminiService = require('./GeminiService');
+const { downloadBuffer } = require('./RealtimeScanService');
 const logger = require('../utils/logger');
 
 const execFileAsync = promisify(execFile);
@@ -34,18 +35,21 @@ class AnalysisService {
       file: selection.file_name,
     });
 
-    // 2. Obtener audio — local (Avaya) o remoto (SFTP/Aware)
+    // 2. Obtener audio — local (Avaya), HTTP (tiempo real) o SFTP
     const t0 = Date.now();
     let rawBuffer;
     if (fs.existsSync(selection.file_path)) {
       rawBuffer = fs.readFileSync(selection.file_path);
       logger.info(`Audio local leído: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+    } else if (selection.file_path.startsWith('https://') || selection.file_path.startsWith('http://')) {
+      rawBuffer = await downloadBuffer(selection.file_path);
+      logger.info(`Audio HTTP descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
     } else {
       const sftp = new SFTPService();
       try {
         await sftp.connect();
         rawBuffer = await sftp.getFile(selection.file_path);
-        logger.info(`Audio descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+        logger.info(`Audio SFTP descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
       } finally {
         await sftp.disconnect();
       }

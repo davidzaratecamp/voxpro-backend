@@ -18,6 +18,7 @@ const AWARE_SOURCES = [
     clientName: 'LV Vital Health',
     db: { host: '10.255.255.30', database: 'aware', user: group1User, password: group1Pass, port: 5432 },
     schema: 'standard',
+    audioBaseUrl: 'https://10.255.255.30/audiofiles',
   },
 
   // Obama - 3 carpetas, 3 servidores distintos
@@ -26,7 +27,8 @@ const AWARE_SOURCES = [
     clientCode: 'obama',
     clientName: 'Obama',
     db: { host: '10.255.255.30', database: 'aware', user: group1User, password: group1Pass, port: 5432 },
-    schema: 'standard', // empleado + call_time
+    schema: 'standard',
+    audioBaseUrl: 'https://10.255.255.30/audiofiles',
   },
   {
     folder: 'AWARE_31',
@@ -34,6 +36,7 @@ const AWARE_SOURCES = [
     clientName: 'Obama',
     db: { host: '10.255.255.31', database: 'aware', user: group1User, password: group1Pass, port: 5432 },
     schema: 'standard',
+    audioBaseUrl: 'https://10.255.255.31/audiofiles',
   },
   {
     folder: 'AWARE_5',
@@ -41,6 +44,7 @@ const AWARE_SOURCES = [
     clientName: 'Obama',
     db: { host: '10.255.255.5', database: 'aware', user: group1User, password: group1Pass, port: 5432 },
     schema: 'standard',
+    audioBaseUrl: 'https://10.255.255.5/audiofiles',
   },
 
   // Claro TYT - migrado completamente a AWARE_8
@@ -50,6 +54,7 @@ const AWARE_SOURCES = [
     clientName: 'Claro TYT',
     db: { host: '10.255.255.8', database: 'aware', user: group1User, password: group1Pass, port: 5432 },
     schema: 'standard',
+    audioBaseUrl: 'https://10.255.255.8/audiofiles',
   },
 
   // Claro Hogar
@@ -59,6 +64,7 @@ const AWARE_SOURCES = [
     clientName: 'Claro Hogar',
     db: { host: '10.255.255.4', database: 'aware', user: group2User, password: group2Pass, port: 5432 },
     schema: 'standard',
+    audioBaseUrl: 'https://10.255.255.4/audiofiles',
   },
 
   // Claro WCB - esquema diferente
@@ -67,7 +73,8 @@ const AWARE_SOURCES = [
     clientCode: 'claro_wcb',
     clientName: 'Claro WCB',
     db: { host: '10.255.255.34', database: 'awareccm', user: group2User, password: group2Pass, port: 5432 },
-    schema: 'awareccm', // usuario + time_speaking
+    schema: 'awareccm',
+    audioBaseUrl: 'https://10.255.255.34/audiofiles',
   },
 
   // Reclutamiento - AWARE_6 compartido, filtrado por anexo de cada reclutadora
@@ -77,6 +84,7 @@ const AWARE_SOURCES = [
     clientName: 'Reclutamiento',
     db: { host: '10.255.255.6', database: 'aware', user: group1User, password: group1Pass, port: 5432 },
     schema: 'standard',
+    audioBaseUrl: 'https://10.255.255.6/audiofiles',
     filterByAnexos: ['4002', '4007', '4012', '4016'],
   },
 ];
