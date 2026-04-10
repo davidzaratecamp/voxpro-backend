@@ -83,6 +83,8 @@ exports.byAgent = asyncHandler(async (req, res) => {
     .where('r.file_date', date)
     .whereIn('c.code', clientCodes)
     .modify((q) => {
+      // Ocultar Zoom a usuarios sin zoom_enabled
+      if (!req.user.zoom_enabled) q.where('s.source_type', '!=', 'zoom');
       if (clientCodes.includes('obama')) {
         q.where('r.call_duration', '>', 0).limit(20);
       } else if (!clientCodes.includes('lv')) {
@@ -93,7 +95,7 @@ exports.byAgent = asyncHandler(async (req, res) => {
     .select(
       'r.id', 'r.file_name', 'r.call_duration',
       'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
-      'c.code as client_code',
+      'c.code as client_code', 's.source_type',
       'a.id as selection_id', 'a.status as selection_status'
     );
 

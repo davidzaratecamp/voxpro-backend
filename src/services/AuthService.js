@@ -28,6 +28,7 @@ class AuthService {
       name: user.name,
       role: user.role,
       client_codes: clientCodes,
+      zoom_enabled: !!user.zoom_enabled,
     };
 
     const token = jwt.sign(payload, config.jwt.secret, {

@@ -119,6 +119,9 @@ exports.weekAgents = asyncHandler(async (req, res) => {
 
   if (agentIds) agentsQuery.whereIn('r.agent_id', agentIds);
 
+  // Ocultar grabaciones Zoom a usuarios sin zoom_enabled
+  if (!req.user.zoom_enabled) agentsQuery.where('s.source_type', '!=', 'zoom');
+
   // Filtro por coordinador (solo supervisor_calidad lo puede usar)
   if (coordinator_id && req.user.role === 'supervisor_calidad') {
     if (coordinator_id === '__unassigned__') {
