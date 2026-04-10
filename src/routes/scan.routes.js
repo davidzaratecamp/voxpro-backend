@@ -19,4 +19,7 @@ router.get('/week-agents', ctrl.weekAgents);
 // GET /api/scan/diagnose?date=YYYY-MM-DD - diagnóstico de grabaciones para una fecha
 router.get('/diagnose', ctrl.diagnose);
 
+// POST /api/scan/zoom - escaneo manual de grabaciones Zoom
+router.post('/zoom', ctrl.triggerZoomScan);
+
 module.exports = router;

@@ -7,6 +7,7 @@ const AuditService = require('../services/AuditService');
 const AnalysisService = require('../services/AnalysisService');
 const SFTPService = require('../services/SFTPService');
 const { downloadBuffer } = require('../services/RealtimeScanService');
+const ZoomAuth = require('../services/ZoomAuthService');
 const db = require('../database/connection');
 const asyncHandler = require('../middleware/asyncHandler');
 
@@ -230,9 +231,12 @@ exports.streamAudio = asyncHandler(async (req, res) => {
   const tmpOutput = path.join(tmpDir, `voxpro_out_${Date.now()}.wav`);
 
   try {
-    // Archivos locales (Avaya) vs HTTP (tiempo real) vs remotos (SFTP)
+    // Archivos locales (Avaya) vs Zoom (API auth) vs HTTP (tiempo real) vs remotos (SFTP)
     if (fs.existsSync(selection.file_path)) {
       fs.copyFileSync(selection.file_path, tmpInput);
+    } else if (selection.file_path.includes('zoom.us') || selection.file_path.includes('zoomgov.com')) {
+      const audioBuffer = await ZoomAuth.download(selection.file_path);
+      fs.writeFileSync(tmpInput, audioBuffer);
     } else if (selection.file_path.startsWith('https://') || selection.file_path.startsWith('http://')) {
       const audioBuffer = await downloadBuffer(selection.file_path);
       fs.writeFileSync(tmpInput, audioBuffer);

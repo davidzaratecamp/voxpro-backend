@@ -1,6 +1,7 @@
 const cron = require('node-cron');
 const config = require('../config');
 const ScannerService = require('../services/ScannerService');
+const ZoomScannerService = require('../services/ZoomScannerService');
 const AuditService = require('../services/AuditService');
 const logger = require('../utils/logger');
 
@@ -15,13 +16,22 @@ function start() {
   }
 
   scanTask = cron.schedule(schedule, async () => {
-    logger.info('Job diario: iniciando escaneo catch-up');
+    logger.info('Job diario: iniciando escaneo catch-up (Aware + Zoom)');
     try {
-      // Escanear grabaciones (catch-up: cubre días faltantes + ayer)
       const scanResult = await ScannerService.runCatchUp();
-      logger.info('Job diario: escaneo completado', scanResult);
+      logger.info('Job diario: escaneo Aware completado', scanResult);
     } catch (err) {
-      logger.error('Job diario: fallido', err);
+      logger.error('Job diario: escaneo Aware fallido', err);
+    }
+
+    // Escaneo Zoom (solo si las credenciales están configuradas)
+    if (process.env.ZOOM_ACCOUNT_ID) {
+      try {
+        const zoomResult = await ZoomScannerService.run();
+        logger.info('Job diario: escaneo Zoom completado', zoomResult);
+      } catch (err) {
+        logger.error('Job diario: escaneo Zoom fallido', err);
+      }
     }
   });
 

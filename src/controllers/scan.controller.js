@@ -1,4 +1,5 @@
 const ScannerService = require('../services/ScannerService');
+const ZoomScannerService = require('../services/ZoomScannerService');
 const AuditService = require('../services/AuditService');
 const asyncHandler = require('../middleware/asyncHandler');
 const db = require('../database/connection');
@@ -265,4 +266,11 @@ exports.diagnose = asyncHandler(async (req, res) => {
     aware8_null_agent_breakdown: enrichStatus,
     awaredb_direct_check: awareDbResult,
   });
+});
+
+// POST /api/scan/zoom — escaneo manual de grabaciones Zoom para una fecha
+exports.triggerZoomScan = asyncHandler(async (req, res) => {
+  const { date } = req.body;
+  const result = await ZoomScannerService.run({ targetDate: date || null });
+  res.json({ message: 'Escaneo Zoom completado', data: result });
 });
