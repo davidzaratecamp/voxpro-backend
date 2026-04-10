@@ -3,6 +3,7 @@ const db = require('../database/connection');
 const asyncHandler = require('../middleware/asyncHandler');
 const RealtimeScanService = require('../services/RealtimeScanService');
 const logger = require('../utils/logger');
+const { resolveAgentIds } = require('../utils/agentUtils');
 
 function getWeekBounds(dateStr) {
   const [y, m, d] = dateStr.split('-').map(Number);
@@ -49,10 +50,16 @@ exports.getAgents = asyncHandler(async (req, res) => {
 
   const calls = await RealtimeScanService.getCalls(date, clientCodes);
 
+  // Resolver agent_ids permitidos (null = sin restricción, [] = ninguno, [ids...] = filtrar)
+  const allowedIds = await resolveAgentIds(req.user.id);
+  const allowedSet = allowedIds ? new Set(allowedIds.map(String)) : null;
+
   const agentMap = new Map();
   for (const call of calls) {
     // Ignorar llamadas sin agente asignado o con IDs inválidos (e.g. -1)
     if (!call.agent_id || Number(call.agent_id) < 0) continue;
+    // Filtrar por agents asignados (coordinador / formador)
+    if (allowedSet && !allowedSet.has(String(call.agent_id))) continue;
     const key = call.agent_id;
     if (!agentMap.has(key)) {
       agentMap.set(key, {

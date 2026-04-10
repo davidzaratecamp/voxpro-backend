@@ -4,6 +4,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 const db = require('../database/connection');
 const AwareDBService = require('../services/AwareDBService');
 const AWARE_SOURCES = require('../config/sources');
+const { resolveAgentIds } = require('../utils/agentUtils');
 
 const WCB_SUBCAMPAIGN_IDS = {
   hogar: [21, 22, 23, 27, 41, 44],
@@ -50,18 +51,6 @@ exports.triggerScanSync = asyncHandler(async (req, res) => {
   res.json({ message: 'Escaneo completado', data: result });
 });
 
-async function resolveAgentIds(userId) {
-  const userRow = await db('users').where('id', userId).select('agent_ids', 'role').first();
-  if (userRow?.role === 'formador') {
-    const ojtAgents = await db('ojt_agents')
-      .where({ formador_id: userId, status: 'activo' })
-      .select('cedula');
-    return ojtAgents.length > 0 ? ojtAgents.map((a) => a.cedula) : [];
-  }
-  return userRow?.agent_ids
-    ? (typeof userRow.agent_ids === 'string' ? JSON.parse(userRow.agent_ids) : userRow.agent_ids)
-    : null;
-}
 
 exports.scanAndSelect = asyncHandler(async (req, res) => {
   const { date } = req.body;
