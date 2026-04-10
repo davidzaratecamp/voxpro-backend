@@ -132,4 +132,30 @@ exports.updateAgents = asyncHandler(async (req, res) => {
   res.json({ message: 'Agentes actualizados', data: { id: coordId, agent_ids } });
 });
 
+/**
+ * DELETE /hc/coordinator/:id
+ * Desactiva un coordinador y libera sus agentes (quedan sin coordinador).
+ */
+exports.deleteCoordinator = asyncHandler(async (req, res) => {
+  const clientCodes = req.user.client_codes || [];
+  const coordId = parseInt(req.params.id);
+
+  const coord = await db('users')
+    .where('id', coordId)
+    .where('role', 'coordinator')
+    .whereRaw(`JSON_OVERLAPS(client_codes, ?)`, [JSON.stringify(clientCodes)])
+    .first();
+
+  if (!coord) {
+    return res.status(404).json({ error: true, message: 'Coordinador no encontrado' });
+  }
+
+  await db('users').where('id', coordId).update({
+    active: 0,
+    agent_ids: JSON.stringify([]),
+  });
+
+  res.json({ message: `Coordinador ${coord.name} desactivado y agentes liberados` });
+});
+
 exports.requireSupervisor = requireSupervisor;
