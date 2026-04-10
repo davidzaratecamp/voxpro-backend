@@ -158,4 +158,28 @@ exports.deleteCoordinator = asyncHandler(async (req, res) => {
   res.json({ message: `Coordinador ${coord.name} desactivado y agentes liberados` });
 });
 
+/**
+ * GET /hc/coordinators
+ * Lista ligera de coordinadores activos del cliente (para dropdowns).
+ */
+exports.listCoordinators = asyncHandler(async (req, res) => {
+  const clientCodes = req.user.client_codes || [];
+
+  const coordinators = await db('users')
+    .where('role', 'coordinator')
+    .where('active', 1)
+    .whereRaw(`JSON_OVERLAPS(client_codes, ?)`, [JSON.stringify(clientCodes)])
+    .select('id', 'name', 'agent_ids');
+
+  const result = coordinators.map((c) => ({
+    id: c.id,
+    name: c.name,
+    agent_ids: typeof c.agent_ids === 'string'
+      ? JSON.parse(c.agent_ids)
+      : (c.agent_ids || []),
+  }));
+
+  res.json({ data: result });
+});
+
 exports.requireSupervisor = requireSupervisor;

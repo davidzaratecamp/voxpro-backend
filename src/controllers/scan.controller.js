@@ -99,7 +99,7 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
 });
 
 exports.weekAgents = asyncHandler(async (req, res) => {
-  const { week_start, subcampaign, client } = req.query;
+  const { week_start, subcampaign, client, coordinator_id } = req.query;
   const clientCodes = req.user.client_codes || [];
   const agentIds = await resolveAgentIds(req.user.id);
 
@@ -128,6 +128,29 @@ exports.weekAgents = asyncHandler(async (req, res) => {
     .select('r.file_date', 'r.agent_id', 'c.code as client_code', db.raw('MAX(r.agent_name) as agent_name'), db.raw('COUNT(*) as recording_count'));
 
   if (agentIds) agentsQuery.whereIn('r.agent_id', agentIds);
+
+  // Filtro por coordinador (solo supervisor_calidad lo puede usar)
+  if (coordinator_id && req.user.role === 'supervisor_calidad') {
+    if (coordinator_id === '__unassigned__') {
+      // Agentes sin coordinador: obtener todos los agent_ids asignados y excluirlos
+      const allCoords = await db('users')
+        .where('role', 'coordinator')
+        .where('active', 1)
+        .whereRaw(`JSON_OVERLAPS(client_codes, ?)`, [JSON.stringify(clientCodes)])
+        .select('agent_ids');
+      const assignedIds = allCoords.flatMap((c) => {
+        const ids = typeof c.agent_ids === 'string' ? JSON.parse(c.agent_ids) : (c.agent_ids || []);
+        return ids.map(String);
+      });
+      if (assignedIds.length > 0) agentsQuery.whereNotIn('r.agent_id', assignedIds);
+    } else {
+      const coord = await db('users').where('id', coordinator_id).select('agent_ids').first();
+      const ids = coord?.agent_ids
+        ? (typeof coord.agent_ids === 'string' ? JSON.parse(coord.agent_ids) : coord.agent_ids)
+        : [];
+      agentsQuery.whereIn('r.agent_id', ids.length > 0 ? ids : ['__none__']);
+    }
+  }
 
   if (subcampaign) {
     // Inferir cliente si no viene explícito (usuario con un solo cliente)
