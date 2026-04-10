@@ -203,9 +203,11 @@ exports.update = asyncHandler(async (req, res) => {
 });
 
 // GET /api/ojt/aware-sources
-// Devuelve aware_sources de grabaciones (excluye integraciones como Avaya)
+// Devuelve aware_sources de grabaciones filtrados por los clientes del usuario (excluye Avaya)
 exports.awareSources = asyncHandler(async (req, res) => {
-  const sources = await db('aware_sources as s')
+  const clientCodes = req.user.client_codes || [];
+
+  const query = db('aware_sources as s')
     .join('clients as c', 's.client_id', 'c.id')
     .where('s.active', true)
     .whereNot('s.folder_name', 'like', 'AVAYA%')
@@ -213,5 +215,11 @@ exports.awareSources = asyncHandler(async (req, res) => {
     .orderBy('c.name')
     .orderBy('s.folder_name');
 
+  // Gestor ve todos; formador solo ve los de sus clientes
+  if (req.user.role !== 'gestor_usuarios' && clientCodes.length > 0) {
+    query.whereIn('c.code', clientCodes);
+  }
+
+  const sources = await query;
   res.json({ data: sources });
 });
