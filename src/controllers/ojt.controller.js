@@ -19,15 +19,13 @@ exports.list = asyncHandler(async (req, res) => {
   const { status, formador_id } = req.query;
 
   const query = db('ojt_agents as o')
-    .join('aware_sources as s', 'o.aware_source_id', 's.id')
     .join('users as u', 'o.formador_id', 'u.id')
     .select(
       'o.id',
       'o.nombre_completo',
       'o.cedula',
       'o.client_code',
-      'o.aware_source_id',
-      's.folder_name as aware_folder',
+      'o.aware_source_ids',
       'o.status',
       'o.fecha_ingreso',
       'o.fecha_graduacion',
@@ -49,7 +47,28 @@ exports.list = asyncHandler(async (req, res) => {
   if (status) query.where('o.status', status);
 
   const agents = await query;
-  res.json({ data: agents });
+
+  // Enriquecer con folder names para display
+  const allSourceIds = [...new Set(agents.flatMap((a) => {
+    const ids = typeof a.aware_source_ids === 'string' ? JSON.parse(a.aware_source_ids || '[]') : (a.aware_source_ids || []);
+    return ids.map(Number).filter(Boolean);
+  }))];
+
+  const sources = allSourceIds.length > 0
+    ? await db('aware_sources').whereIn('id', allSourceIds).select('id', 'folder_name')
+    : [];
+  const sourceMap = Object.fromEntries(sources.map((s) => [s.id, s.folder_name]));
+
+  const result = agents.map((a) => {
+    const ids = typeof a.aware_source_ids === 'string' ? JSON.parse(a.aware_source_ids || '[]') : (a.aware_source_ids || []);
+    return {
+      ...a,
+      aware_source_ids: ids.map(Number).filter(Boolean),
+      aware_folders: ids.map(Number).filter(Boolean).map((id) => sourceMap[id] || String(id)).join(', '),
+    };
+  });
+
+  res.json({ data: result });
 });
 
 // GET /api/ojt/agents/:id
@@ -58,14 +77,9 @@ exports.getById = asyncHandler(async (req, res) => {
   const { role, id: userId } = req.user;
 
   const agent = await db('ojt_agents as o')
-    .join('aware_sources as s', 'o.aware_source_id', 's.id')
     .join('users as u', 'o.formador_id', 'u.id')
     .where('o.id', id)
-    .select(
-      'o.*',
-      's.folder_name as aware_folder',
-      'u.name as formador_name'
-    )
+    .select('o.*', 'u.name as formador_name')
     .first();
 
   if (!agent) return res.status(404).json({ error: true, message: 'Agente OJT no encontrado' });
@@ -80,12 +94,12 @@ exports.getById = asyncHandler(async (req, res) => {
 // POST /api/ojt/agents
 exports.create = asyncHandler(async (req, res) => {
   const { role, id: userId } = req.user;
-  const { nombre_completo, cedula, aware_source_id, client_code, fecha_ingreso, notas } = req.body;
+  const { nombre_completo, cedula, aware_source_ids, client_code, fecha_ingreso, notas } = req.body;
 
-  if (!nombre_completo || !cedula || !aware_source_id || !client_code || !fecha_ingreso) {
+  if (!nombre_completo || !cedula || !aware_source_ids?.length || !client_code || !fecha_ingreso) {
     return res.status(400).json({
       error: true,
-      message: 'nombre_completo, cedula, aware_source_id, client_code y fecha_ingreso son requeridos',
+      message: 'nombre_completo, cedula, aware_source_ids, client_code y fecha_ingreso son requeridos',
     });
   }
   if (!/^\d+$/.test(String(cedula).trim())) {
@@ -94,6 +108,8 @@ exports.create = asyncHandler(async (req, res) => {
       message: 'La cédula solo puede contener dígitos numéricos',
     });
   }
+
+  const sourceIds = Array.isArray(aware_source_ids) ? aware_source_ids.map(Number) : [Number(aware_source_ids)];
 
   // El formador solo puede registrar agentes para sí mismo
   const formadorId = role === 'gestor_usuarios'
@@ -114,10 +130,10 @@ exports.create = asyncHandler(async (req, res) => {
     }
   }
 
-  // Verificar que el aware_source_id existe
-  const source = await db('aware_sources').where('id', aware_source_id).first();
-  if (!source) {
-    return res.status(400).json({ error: true, message: 'aware_source_id inválido' });
+  // Verificar que todos los aware_source_ids existen
+  const sources = await db('aware_sources').whereIn('id', sourceIds).select('id');
+  if (sources.length !== sourceIds.length) {
+    return res.status(400).json({ error: true, message: 'Uno o más aware_source_ids son inválidos' });
   }
 
   // Verificar que no haya un agente activo con la misma cédula para este formador
@@ -135,7 +151,7 @@ exports.create = asyncHandler(async (req, res) => {
     formador_id: formadorId,
     nombre_completo: nombre_completo.trim(),
     cedula: cedula.trim(),
-    aware_source_id,
+    aware_source_ids: JSON.stringify(sourceIds),
     client_code,
     status: 'activo',
     fecha_ingreso,
@@ -158,13 +174,16 @@ exports.update = asyncHandler(async (req, res) => {
     return res.status(403).json({ error: true, message: 'Sin acceso a este agente' });
   }
 
-  const { nombre_completo, cedula, aware_source_id, client_code, status, fecha_ingreso, fecha_graduacion, notas } = req.body;
+  const { nombre_completo, cedula, aware_source_ids, client_code, status, fecha_ingreso, fecha_graduacion, notas } = req.body;
 
   const updates = { updated_at: db.fn.now() };
-  if (nombre_completo !== undefined) updates.nombre_completo = nombre_completo.trim();
-  if (cedula          !== undefined) updates.cedula = cedula.trim();
-  if (aware_source_id !== undefined) updates.aware_source_id = aware_source_id;
-  if (client_code     !== undefined) updates.client_code = client_code;
+  if (nombre_completo   !== undefined) updates.nombre_completo = nombre_completo.trim();
+  if (cedula            !== undefined) updates.cedula = cedula.trim();
+  if (aware_source_ids  !== undefined) {
+    const ids = Array.isArray(aware_source_ids) ? aware_source_ids.map(Number) : [Number(aware_source_ids)];
+    updates.aware_source_ids = JSON.stringify(ids);
+  }
+  if (client_code       !== undefined) updates.client_code = client_code;
   if (fecha_ingreso   !== undefined) updates.fecha_ingreso = fecha_ingreso;
   if (notas           !== undefined) updates.notas = notas;
 
@@ -184,11 +203,14 @@ exports.update = asyncHandler(async (req, res) => {
 });
 
 // GET /api/ojt/aware-sources
-// Devuelve todos los aware_sources para el dropdown del formulario
+// Devuelve aware_sources de grabaciones (excluye integraciones como Avaya)
 exports.awareSources = asyncHandler(async (req, res) => {
   const sources = await db('aware_sources as s')
     .join('clients as c', 's.client_id', 'c.id')
+    .where('s.active', true)
+    .whereNot('s.folder_name', 'like', 'AVAYA%')
     .select('s.id', 's.folder_name', 'c.name as client_name', 'c.code as client_code')
+    .orderBy('c.name')
     .orderBy('s.folder_name');
 
   res.json({ data: sources });
