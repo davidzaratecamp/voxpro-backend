@@ -6,6 +6,7 @@ router.use(ctrl.requireSupervisor);
 router.get('/overview', ctrl.overview);
 router.get('/coordinators', ctrl.listCoordinators);
 router.patch('/coordinator/:id/agents', ctrl.updateAgents);
+router.patch('/coordinator/:id/campaign', ctrl.updateCampaign);
 router.delete('/coordinator/:id', ctrl.deleteCoordinator);
 
 module.exports = router;

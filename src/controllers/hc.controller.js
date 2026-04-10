@@ -32,7 +32,7 @@ exports.overview = asyncHandler(async (req, res) => {
   const coordinators = await db('users')
     .where('role', 'coordinator')
     .whereRaw(`JSON_OVERLAPS(client_codes, ?)`, [JSON.stringify(clientCodes)])
-    .select('id', 'name', 'agent_ids', 'client_codes', 'active');
+    .select('id', 'name', 'agent_ids', 'client_codes', 'active', 'campaign');
 
   // 2. Agentes activos en Aware esa semana
   const activeRows = await db('recordings as r')
@@ -90,6 +90,7 @@ exports.overview = asyncHandler(async (req, res) => {
       id: coord.id,
       name: coord.name,
       active: !!coord.active,
+      campaign: coord.campaign || null,
       client_codes: typeof coord.client_codes === 'string'
         ? JSON.parse(coord.client_codes)
         : (coord.client_codes || []),
@@ -169,17 +170,48 @@ exports.listCoordinators = asyncHandler(async (req, res) => {
     .where('role', 'coordinator')
     .where('active', 1)
     .whereRaw(`JSON_OVERLAPS(client_codes, ?)`, [JSON.stringify(clientCodes)])
-    .select('id', 'name', 'agent_ids');
+    .select('id', 'name', 'agent_ids', 'campaign');
 
   const result = coordinators.map((c) => ({
     id: c.id,
     name: c.name,
+    campaign: c.campaign || null,
     agent_ids: typeof c.agent_ids === 'string'
       ? JSON.parse(c.agent_ids)
       : (c.agent_ids || []),
   }));
 
   res.json({ data: result });
+});
+
+/**
+ * PATCH /hc/coordinator/:id/campaign
+ * Actualiza la campaña de un coordinador.
+ * Body: { campaign: 'ventas' | 'customer' | null }
+ */
+exports.updateCampaign = asyncHandler(async (req, res) => {
+  const clientCodes = req.user.client_codes || [];
+  const coordId = parseInt(req.params.id);
+  const { campaign } = req.body;
+
+  const validCampaigns = ['ventas', 'customer', null];
+  if (!validCampaigns.includes(campaign)) {
+    return res.status(400).json({ error: true, message: 'Campaña inválida. Valores: ventas, customer, null' });
+  }
+
+  const coord = await db('users')
+    .where('id', coordId)
+    .where('role', 'coordinator')
+    .whereRaw(`JSON_OVERLAPS(client_codes, ?)`, [JSON.stringify(clientCodes)])
+    .first();
+
+  if (!coord) {
+    return res.status(404).json({ error: true, message: 'Coordinador no encontrado' });
+  }
+
+  await db('users').where('id', coordId).update({ campaign: campaign || null });
+
+  res.json({ message: 'Campaña actualizada', data: { id: coordId, campaign } });
 });
 
 exports.requireSupervisor = requireSupervisor;
