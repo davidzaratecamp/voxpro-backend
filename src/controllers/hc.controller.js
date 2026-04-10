@@ -28,12 +28,11 @@ exports.overview = asyncHandler(async (req, res) => {
     return d.toISOString().slice(0, 10);
   })();
 
-  // 1. Coordinadores del mismo cliente
+  // 1. Coordinadores del mismo cliente (activos e inactivos)
   const coordinators = await db('users')
     .where('role', 'coordinator')
-    .where('active', 1)
     .whereRaw(`JSON_OVERLAPS(client_codes, ?)`, [JSON.stringify(clientCodes)])
-    .select('id', 'name', 'agent_ids', 'client_codes');
+    .select('id', 'name', 'agent_ids', 'client_codes', 'active');
 
   // 2. Agentes activos en Aware esa semana
   const activeRows = await db('recordings as r')
@@ -51,9 +50,9 @@ exports.overview = asyncHandler(async (req, res) => {
       db.raw('MAX(c.code) as client_code')
     );
 
-  // IDs ya asignados a algún coordinador
+  // IDs ya asignados a algún coordinador activo
   const assignedIds = new Set();
-  for (const coord of coordinators) {
+  for (const coord of coordinators.filter((c) => c.active)) {
     const ids = typeof coord.agent_ids === 'string'
       ? JSON.parse(coord.agent_ids)
       : (coord.agent_ids || []);
@@ -90,6 +89,7 @@ exports.overview = asyncHandler(async (req, res) => {
     return {
       id: coord.id,
       name: coord.name,
+      active: !!coord.active,
       client_codes: typeof coord.client_codes === 'string'
         ? JSON.parse(coord.client_codes)
         : (coord.client_codes || []),
