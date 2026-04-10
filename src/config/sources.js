@@ -46,6 +46,14 @@ const AWARE_SOURCES = [
     schema: 'standard',
     audioBaseUrl: 'https://10.255.255.5/audiofiles',
   },
+  {
+    folder: 'AWARE_32',
+    clientCode: 'obama',
+    clientName: 'Obama',
+    db: { host: '10.255.255.32', database: 'aware', user: group1User, password: group1Pass, port: 5432 },
+    schema: 'standard',
+    audioBaseUrl: 'https://10.255.255.32/audiofiles',
+  },
 
   // Claro TYT - migrado completamente a AWARE_8
   {
