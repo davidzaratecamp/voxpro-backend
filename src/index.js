@@ -4,6 +4,7 @@ const app = require('./app');
 const config = require('./config');
 const logger = require('./utils/logger');
 const db = require('./database/connection');
+const scheduler = require('./jobs/scheduler');
 
 async function start() {
   // Verificar conexión a base de datos
@@ -21,6 +22,9 @@ async function start() {
     logger.info(`VoxPro API corriendo en puerto ${config.port} [${config.env}]`);
   });
   server.timeout = 20 * 60 * 1000;
+
+  // Iniciar scheduler de escaneo nocturno
+  scheduler.start();
 }
 
 // Shutdown limpio

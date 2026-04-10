@@ -38,7 +38,7 @@ const config = {
   },
 
   scan: {
-    cronSchedule: process.env.SCAN_CRON_SCHEDULE || '0 2 * * *',
+    cronSchedule: process.env.SCAN_CRON_SCHEDULE || '0 5 * * *',
     batchSize: 500,
   },
 
