@@ -131,11 +131,14 @@ exports.byAgentPhone = asyncHandler(async (req, res) => {
     .where('r.file_date', date)
     .where('r.call_phone', phone)
     .whereIn('c.code', clientCodes)
+    .modify((q) => {
+      if (!req.user.zoom_enabled) q.where('s.source_type', '!=', 'zoom');
+    })
     .orderBy('r.call_duration', 'desc')
     .select(
       'r.id', 'r.file_name', 'r.call_duration',
       'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
-      'c.code as client_code',
+      'c.code as client_code', 's.source_type',
       'a.id as selection_id', 'a.status as selection_status'
     );
 
