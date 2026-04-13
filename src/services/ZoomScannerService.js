@@ -88,6 +88,8 @@ class ZoomScannerService {
   /**
    * Inserta una grabación de Zoom en la tabla recordings.
    * Usa download_url como identificador estable (necesita auth para descargar).
+   * Si el agente está en la tabla agents con cédula, usa la cédula como agent_id
+   * para que los filtros de coordinador/formador funcionen igual que con Aware.
    */
   async _insertRecording(rec, sourceId) {
     if (!rec.download_url) return 'skipped';
@@ -105,9 +107,18 @@ class ZoomScannerService {
     // Fecha local de la llamada (la API devuelve UTC, usamos la parte de fecha)
     const fileDate = rec.start_time ? rec.start_time.slice(0, 10) : null;
 
-    // Agente: usar extensión como agent_id (consistente con el sistema)
     const agentExt = rec.owner?.extension_number ? String(rec.owner.extension_number) : null;
-    const agentId  = agentExt || rec.owner?.id || null;
+
+    // Buscar cédula en tabla agents para unificar identidad con grabaciones Aware
+    let agentId = agentExt || rec.owner?.id || null;
+    let agentName = rec.owner?.name || null;
+    if (agentExt) {
+      const agentRow = await db('agents').where('zoom_extension', agentExt).whereNotNull('cedula').first();
+      if (agentRow) {
+        agentId   = agentRow.cedula;
+        agentName = agentRow.name;
+      }
+    }
 
     await db('recordings').insert({
       aware_source_id:  sourceId,
@@ -120,7 +131,7 @@ class ZoomScannerService {
       call_id:          rec.id,
       is_queue_call:    false,
       agent_id:         agentId,
-      agent_name:       rec.owner?.name || null,
+      agent_name:       agentName,
       agent_extension:  agentExt,
       call_duration:    rec.duration || null,
       agent_enriched:   true,

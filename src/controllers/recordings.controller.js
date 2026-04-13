@@ -72,8 +72,9 @@ exports.byAgent = asyncHandler(async (req, res) => {
   }
   const clientCodes = req.user.client_codes || [];
   const db = require('../database/connection');
+  const isObama = clientCodes.includes('obama');
 
-  const recordings = await db('recordings as r')
+  const baseQuery = () => db('recordings as r')
     .join('aware_sources as s', 'r.aware_source_id', 's.id')
     .join('clients as c', 's.client_id', 'c.id')
     .leftJoin('audit_selections as a', function () {
@@ -82,15 +83,6 @@ exports.byAgent = asyncHandler(async (req, res) => {
     .where('r.agent_id', agent_id)
     .where('r.file_date', date)
     .whereIn('c.code', clientCodes)
-    .modify((q) => {
-      // Ocultar Zoom a usuarios sin zoom_enabled
-      if (!req.user.zoom_enabled) q.where('s.source_type', '!=', 'zoom');
-      if (clientCodes.includes('obama')) {
-        q.where('r.call_duration', '>', 0).limit(20);
-      } else if (!clientCodes.includes('lv')) {
-        q.where('r.file_size', '>=', 10240).limit(20);
-      }
-    })
     .orderBy('r.call_duration', 'desc')
     .select(
       'r.id', 'r.file_name', 'r.call_duration',
@@ -98,6 +90,25 @@ exports.byAgent = asyncHandler(async (req, res) => {
       'c.code as client_code', 's.source_type',
       'a.id as selection_id', 'a.status as selection_status'
     );
+
+  // Obama con zoom_enabled: devolver 10 Aware + 10 Zoom por separado
+  if (isObama && req.user.zoom_enabled) {
+    const [aware, zoom] = await Promise.all([
+      baseQuery().where('s.source_type', '!=', 'zoom').where('r.call_duration', '>', 0).limit(10),
+      baseQuery().where('s.source_type', 'zoom').where('r.call_duration', '>', 0).limit(10),
+    ]);
+    return res.json({ data: aware, zoom_data: zoom });
+  }
+
+  // Resto de clientes o usuarios sin zoom_enabled
+  const recordings = await baseQuery().modify((q) => {
+    if (!req.user.zoom_enabled) q.where('s.source_type', '!=', 'zoom');
+    if (isObama) {
+      q.where('r.call_duration', '>', 0).limit(20);
+    } else if (!clientCodes.includes('lv')) {
+      q.where('r.file_size', '>=', 10240).limit(20);
+    }
+  });
 
   res.json({ data: recordings });
 });
@@ -132,7 +143,7 @@ exports.byAgentPhone = asyncHandler(async (req, res) => {
 });
 
 exports.byPhone = asyncHandler(async (req, res) => {
-  const { phone } = req.query;
+  const { phone, source } = req.query;
   if (!phone || phone.trim().length < 7) {
     return res.status(400).json({ error: true, message: 'Ingresa al menos 7 dígitos' });
   }
@@ -147,12 +158,20 @@ exports.byPhone = asyncHandler(async (req, res) => {
     })
     .where('r.call_phone', 'like', `%${phone.trim()}%`)
     .whereIn('c.code', clientCodes)
+    .modify((q) => {
+      if (source === 'zoom') {
+        q.where('s.source_type', 'zoom');
+      } else if (!req.user.zoom_enabled) {
+        q.where('s.source_type', '!=', 'zoom');
+      }
+    })
     .orderBy('r.file_date', 'desc')
     .limit(50)
     .select(
       'r.id', 'r.file_name', 'r.call_duration',
       'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
       'c.code as client_code', 'c.name as client_name',
+      's.source_type',
       'a.id as selection_id', 'a.status as selection_status'
     );
 
