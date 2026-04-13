@@ -9,6 +9,13 @@ const logger    = require('../utils/logger');
  * Equivalente a ScannerService pero usa la API REST de Zoom en lugar de SFTP.
  * Los metadatos del agente vienen incluidos en la respuesta — no necesita
  * fase de enriquecimiento separada (agent_enriched = true desde el inicio).
+ *
+ * Resolución de identidad (sin intervención manual):
+ *   1. Al insertar: busca extensión en tabla `agents` (cedula ya conocida).
+ *   2. Si no está: intenta auto-match fuzzy por nombre contra Aware.
+ *   3. Si tampoco: guarda el agente con cedula=NULL para reintento futuro.
+ *   4. Al final de cada scan: `resolveUnmatchedAgents()` reintenta todos los
+ *      agentes pendientes — cuando aparezcan en Aware se resuelven solos.
  */
 class ZoomScannerService {
   /**
@@ -58,6 +65,13 @@ class ZoomScannerService {
       }
     }
 
+    // Al final de cada scan, reintentar agentes que aún no tienen cédula.
+    // Cuando aparezcan en Aware, se resuelven solos en el siguiente ciclo.
+    const resolved = await this.resolveUnmatchedAgents();
+    if (resolved.resolved > 0) {
+      logger.info(`Zoom: resueltos ${resolved.resolved}/${resolved.checked} agentes pendientes`);
+    }
+
     logger.info('Zoom: scan completado', summary);
     return summary;
   }
@@ -91,8 +105,9 @@ class ZoomScannerService {
    *
    * Resolución de identidad del agente (en orden):
    *   1. Tabla `agents` por zoom_extension → cédula conocida
-   *   2. Auto-match fuzzy por nombre contra grabaciones Aware del mismo cliente
-   *   3. Fallback: extensión como agent_id (sin cédula)
+   *   2. Auto-match fuzzy por nombre contra grabaciones Aware
+   *   3. Fallback: extensión como agent_id + guarda en agents con cedula=NULL
+   *      para que resolveUnmatchedAgents() lo reintente en el futuro.
    */
   async _insertRecording(rec, source) {
     if (!rec.download_url) return 'skipped';
@@ -117,7 +132,7 @@ class ZoomScannerService {
     let agentName = zoomName;
 
     if (agentExt) {
-      // 1. Lookup en tabla agents (mapping manual o auto-aprendido)
+      // 1. Lookup en tabla agents (mapping ya conocido)
       const agentRow = await db('agents')
         .where('zoom_extension', agentExt)
         .whereNotNull('cedula')
@@ -127,11 +142,23 @@ class ZoomScannerService {
         agentId   = agentRow.cedula;
         agentName = agentRow.name;
       } else if (zoomName) {
-        // 2. Auto-match fuzzy contra grabaciones Aware del mismo cliente
+        // 2. Auto-match fuzzy contra grabaciones Aware
         const matched = await this._autoMatchAgent(agentExt, zoomName, source.client_id);
         if (matched) {
           agentId   = matched.cedula;
           agentName = matched.name;
+        } else {
+          // 3. Sin match aún: guardar en agents con cedula=NULL para reintento futuro
+          await db('agents')
+            .insert({
+              name:           zoomName,
+              cedula:         null,
+              zoom_extension: agentExt,
+              client_id:      source.client_id,
+              active:         true,
+            })
+            .onConflict('zoom_extension')
+            .ignore();
         }
       }
     }
@@ -158,6 +185,37 @@ class ZoomScannerService {
   }
 
   /**
+   * Reintenta resolver la cédula de todos los agentes Zoom sin cédula.
+   * Se llama al final de cada scan. Cuando el agente aparezca en Aware
+   * (aunque sea días después), en el siguiente scan queda resuelto y sus
+   * grabaciones existentes se actualizan en masa.
+   */
+  async resolveUnmatchedAgents() {
+    const unmatched = await db('agents')
+      .whereNull('cedula')
+      .whereNotNull('zoom_extension')
+      .whereNotNull('name')
+      .select('id', 'name', 'zoom_extension', 'client_id');
+
+    let resolved = 0;
+
+    for (const agent of unmatched) {
+      const matched = await this._autoMatchAgent(agent.zoom_extension, agent.name, agent.client_id);
+      if (!matched) continue;
+
+      // Actualizar en masa todas las grabaciones Zoom de esta extensión
+      await db('recordings')
+        .where('agent_extension', agent.zoom_extension)
+        .where('agent_id', agent.zoom_extension) // solo las que quedaron sin cédula
+        .update({ agent_id: matched.cedula, agent_name: matched.name });
+
+      resolved++;
+    }
+
+    return { checked: unmatched.length, resolved };
+  }
+
+  /**
    * Intenta resolver la cédula de un agente Zoom buscando su nombre en las
    * grabaciones Aware del mismo cliente mediante coincidencia difusa de tokens.
    *
@@ -177,7 +235,6 @@ class ZoomScannerService {
         .replace(/[\u0300-\u036f]/g, '')
         .replace(/[^a-z0-9\s]/g, '');
 
-    // Dividir CamelCase y normalizar
     const splitCamel = (s) => s.replace(/([a-z])([A-Z])/g, '$1 $2');
     const tokens = normalize(splitCamel(zoomName))
       .split(/\s+/)
@@ -185,18 +242,17 @@ class ZoomScannerService {
 
     if (tokens.length === 0) return null;
 
-    // Candidatos: agentes distintos en grabaciones Aware del mismo cliente
+    // Candidatos: agentes distintos en todas las grabaciones Aware (cualquier cliente)
     const candidates = await db('recordings as r')
       .join('aware_sources as s', 'r.aware_source_id', 's.id')
-      .where('s.client_id', clientId)
       .where('s.source_type', '!=', 'zoom')
       .whereNotNull('r.agent_id')
       .whereNotNull('r.agent_name')
       .distinct('r.agent_id', 'r.agent_name')
-      .limit(1000);
+      .limit(2000);
 
-    let best      = null;
-    let bestScore = 0;
+    let best        = null;
+    let bestScore   = 0;
     let bestOverlap = 0;
 
     for (const c of candidates) {
