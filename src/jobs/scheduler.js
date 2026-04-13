@@ -39,7 +39,7 @@ function start() {
   // Job intradiario: escaneo Zoom de HOY cada 2 horas (7-21h)
   // Permite ver las grabaciones del día actual sin esperar al día siguiente.
   if (process.env.ZOOM_ACCOUNT_ID) {
-    zoomTodayTask = cron.schedule('0 7,9,11,13,15,17,19,21 * * *', async () => {
+    zoomTodayTask = cron.schedule('0 7-21 * * *', async () => {
       const today = new Date().toISOString().slice(0, 10);
       logger.info(`Job intradiario: escaneando Zoom para hoy (${today})`);
       try {
@@ -49,7 +49,7 @@ function start() {
         logger.error('Job intradiario: Zoom fallido', err);
       }
     });
-    logger.info('Scheduler: job intradiario Zoom activado (cada 2h, 7-21h)');
+    logger.info('Scheduler: job intradiario Zoom activado (cada 1h, 7-21h)');
   }
 
   logger.info(`Scheduler iniciado - job diario programado: ${schedule}`);
