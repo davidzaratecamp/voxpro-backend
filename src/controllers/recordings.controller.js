@@ -115,10 +115,37 @@ exports.byAgent = asyncHandler(async (req, res) => {
       )
       .limit(10);
 
-    const [aware, zoom] = await Promise.all([
+    const selectCols = [
+      'r.id', 'r.file_name', 'r.call_duration',
+      'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
+      'c.code as client_code', 's.source_type',
+      'a.id as selection_id', 'a.status as selection_status',
+    ];
+
+    const auditedByUser = () => db('recordings as r')
+      .join('aware_sources as s', 'r.aware_source_id', 's.id')
+      .join('clients as c', 's.client_id', 'c.id')
+      .join('audit_selections as a', function () {
+        this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
+      })
+      .where('r.agent_id', agent_id)
+      .where('r.file_date', date)
+      .select(selectCols);
+
+    const [aware, zoom, auditedRows] = await Promise.all([
       awareQuery(),
       baseQuery().where('s.source_type', 'zoom').where('r.call_duration', '>', 0).limit(10),
+      auditedByUser(),
     ]);
+
+    // Agregar grabaciones auditadas (desde búsqueda) que no estén ya en el top 10
+    const awareIds  = new Set(aware.map((r) => r.id));
+    const zoomIds   = new Set(zoom.map((r) => r.id));
+    for (const row of auditedRows) {
+      if (row.source_type === 'zoom' && !zoomIds.has(row.id)) zoom.push(row);
+      if (row.source_type !== 'zoom' && !awareIds.has(row.id)) aware.push(row);
+    }
+
     return res.json({ data: aware, zoom_data: zoom });
   }
 
