@@ -16,6 +16,7 @@ const auth = (req, res, next) => {
       name: payload.name,
       role: payload.role,
       client_codes: payload.client_codes,
+      zoom_enabled: !!payload.zoom_enabled,
     };
     next();
   } catch (err) {
