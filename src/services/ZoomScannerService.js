@@ -104,8 +104,8 @@ class ZoomScannerService {
       ? (rec.caller_number || null)
       : (rec.callee_number || null);
 
-    // Fecha local de la llamada (la API devuelve UTC, usamos la parte de fecha)
-    const fileDate = rec.start_time ? rec.start_time.slice(0, 10) : null;
+    // Fecha local de la llamada (la API devuelve UTC en date_time, usamos la parte de fecha)
+    const fileDate = (rec.date_time || rec.start_time || null)?.slice(0, 10) ?? null;
 
     const agentExt = rec.owner?.extension_number ? String(rec.owner.extension_number) : null;
 
