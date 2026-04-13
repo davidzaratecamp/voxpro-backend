@@ -7,6 +7,7 @@ const db = require('../database/connection');
 const SFTPService = require('./SFTPService');
 const GeminiService = require('./GeminiService');
 const { downloadBuffer } = require('./RealtimeScanService');
+const ZoomAuth = require('./ZoomAuthService');
 const logger = require('../utils/logger');
 
 const execFileAsync = promisify(execFile);
@@ -41,6 +42,9 @@ class AnalysisService {
     if (fs.existsSync(selection.file_path)) {
       rawBuffer = fs.readFileSync(selection.file_path);
       logger.info(`Audio local leído: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+    } else if (selection.file_path.includes('zoom.us') || selection.file_path.includes('zoomgov.com')) {
+      rawBuffer = await ZoomAuth.download(selection.file_path);
+      logger.info(`Audio Zoom descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
     } else if (selection.file_path.startsWith('https://') || selection.file_path.startsWith('http://')) {
       rawBuffer = await downloadBuffer(selection.file_path);
       logger.info(`Audio HTTP descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
