@@ -25,7 +25,7 @@ class ZoomScannerService {
       .where('s.folder_name', 'ZOOM_PHONE')
       .where('s.source_type', 'zoom')
       .where('s.active', true)
-      .select('s.id', 'c.code as client_code')
+      .select('s.id', 's.client_id', 'c.code as client_code')
       .first();
 
     if (!source) {
@@ -49,7 +49,7 @@ class ZoomScannerService {
 
     for (const rec of recordings) {
       try {
-        const result = await this._insertRecording(rec, source.id);
+        const result = await this._insertRecording(rec, source);
         if (result === 'inserted') summary.inserted++;
         else summary.skipped++;
       } catch (err) {
@@ -88,10 +88,13 @@ class ZoomScannerService {
   /**
    * Inserta una grabación de Zoom en la tabla recordings.
    * Usa download_url como identificador estable (necesita auth para descargar).
-   * Si el agente está en la tabla agents con cédula, usa la cédula como agent_id
-   * para que los filtros de coordinador/formador funcionen igual que con Aware.
+   *
+   * Resolución de identidad del agente (en orden):
+   *   1. Tabla `agents` por zoom_extension → cédula conocida
+   *   2. Auto-match fuzzy por nombre contra grabaciones Aware del mismo cliente
+   *   3. Fallback: extensión como agent_id (sin cédula)
    */
-  async _insertRecording(rec, sourceId) {
+  async _insertRecording(rec, source) {
     if (!rec.download_url) return 'skipped';
 
     const pathHash = crypto.createHash('sha256').update(rec.download_url).digest('hex');
@@ -107,21 +110,34 @@ class ZoomScannerService {
     // Fecha local de la llamada (la API devuelve UTC en date_time, usamos la parte de fecha)
     const fileDate = (rec.date_time || rec.start_time || null)?.slice(0, 10) ?? null;
 
-    const agentExt = rec.owner?.extension_number ? String(rec.owner.extension_number) : null;
+    const agentExt  = rec.owner?.extension_number ? String(rec.owner.extension_number) : null;
+    const zoomName  = rec.owner?.name || null;
 
-    // Buscar cédula en tabla agents para unificar identidad con grabaciones Aware
-    let agentId = agentExt || rec.owner?.id || null;
-    let agentName = rec.owner?.name || null;
+    let agentId   = agentExt || rec.owner?.id || null;
+    let agentName = zoomName;
+
     if (agentExt) {
-      const agentRow = await db('agents').where('zoom_extension', agentExt).whereNotNull('cedula').first();
+      // 1. Lookup en tabla agents (mapping manual o auto-aprendido)
+      const agentRow = await db('agents')
+        .where('zoom_extension', agentExt)
+        .whereNotNull('cedula')
+        .first();
+
       if (agentRow) {
         agentId   = agentRow.cedula;
         agentName = agentRow.name;
+      } else if (zoomName) {
+        // 2. Auto-match fuzzy contra grabaciones Aware del mismo cliente
+        const matched = await this._autoMatchAgent(agentExt, zoomName, source.client_id);
+        if (matched) {
+          agentId   = matched.cedula;
+          agentName = matched.name;
+        }
       }
     }
 
     await db('recordings').insert({
-      aware_source_id:  sourceId,
+      aware_source_id:  source.id,
       file_name:        `${rec.id}.mp4`,
       file_path:        rec.download_url,
       file_path_hash:   pathHash,
@@ -139,6 +155,89 @@ class ZoomScannerService {
     });
 
     return 'inserted';
+  }
+
+  /**
+   * Intenta resolver la cédula de un agente Zoom buscando su nombre en las
+   * grabaciones Aware del mismo cliente mediante coincidencia difusa de tokens.
+   *
+   * Si encuentra un candidato confiable (≥2 tokens en común, score ≥ 0.5),
+   * guarda el mapeo en la tabla `agents` para futuras grabaciones.
+   *
+   * @param {string} extension - Extensión Zoom del agente
+   * @param {string} zoomName  - Nombre completo tal como viene de la API Zoom
+   * @param {number} clientId  - client_id de la fuente Zoom
+   * @returns {{ cedula: string, name: string } | null}
+   */
+  async _autoMatchAgent(extension, zoomName, clientId) {
+    const normalize = (str) =>
+      str
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9\s]/g, '');
+
+    // Dividir CamelCase y normalizar
+    const splitCamel = (s) => s.replace(/([a-z])([A-Z])/g, '$1 $2');
+    const tokens = normalize(splitCamel(zoomName))
+      .split(/\s+/)
+      .filter((t) => t.length > 2);
+
+    if (tokens.length === 0) return null;
+
+    // Candidatos: agentes distintos en grabaciones Aware del mismo cliente
+    const candidates = await db('recordings as r')
+      .join('aware_sources as s', 'r.aware_source_id', 's.id')
+      .where('s.client_id', clientId)
+      .where('s.source_type', '!=', 'zoom')
+      .whereNotNull('r.agent_id')
+      .whereNotNull('r.agent_name')
+      .distinct('r.agent_id', 'r.agent_name')
+      .limit(1000);
+
+    let best      = null;
+    let bestScore = 0;
+    let bestOverlap = 0;
+
+    for (const c of candidates) {
+      const candTokens = normalize(splitCamel(c.agent_name))
+        .split(/\s+/)
+        .filter((t) => t.length > 2);
+
+      const overlap = tokens.filter((t) => candTokens.includes(t)).length;
+      const score   = overlap / Math.max(tokens.length, candTokens.length);
+
+      if (overlap >= 2 && score >= 0.5 && score > bestScore) {
+        bestScore   = score;
+        bestOverlap = overlap;
+        best        = c;
+      }
+    }
+
+    if (!best) return null;
+
+    // Persistir el mapeo para no repetir la búsqueda en el futuro
+    try {
+      await db('agents')
+        .insert({
+          name:           best.agent_name,
+          cedula:         best.agent_id,
+          zoom_extension: extension,
+          client_id:      clientId,
+          active:         true,
+        })
+        .onConflict('zoom_extension')
+        .merge(['cedula', 'name']);
+
+      logger.info(
+        `Zoom: auto-matched "${zoomName}" → ${best.agent_id} (${best.agent_name}) ` +
+        `[overlap=${bestOverlap}, score=${bestScore.toFixed(2)}]`
+      );
+    } catch (err) {
+      logger.warn(`Zoom: no se pudo guardar auto-match para extensión ${extension}: ${err.message}`);
+    }
+
+    return { cedula: best.agent_id, name: best.agent_name };
   }
 
   _yesterday() {
