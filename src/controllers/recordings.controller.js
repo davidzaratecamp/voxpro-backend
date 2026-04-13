@@ -114,7 +114,7 @@ exports.byAgent = asyncHandler(async (req, res) => {
 });
 
 exports.byAgentPhone = asyncHandler(async (req, res) => {
-  const { agent_id, date, phone } = req.query;
+  const { agent_id, date, phone, source } = req.query;
   if (!agent_id || !date || !phone) {
     return res.status(400).json({ error: true, message: 'Faltan parámetros agent_id, date y phone' });
   }
@@ -132,7 +132,8 @@ exports.byAgentPhone = asyncHandler(async (req, res) => {
     .where('r.call_phone', phone)
     .whereIn('c.code', clientCodes)
     .modify((q) => {
-      if (!req.user.zoom_enabled) q.where('s.source_type', '!=', 'zoom');
+      if (source === 'zoom') q.where('s.source_type', 'zoom');
+      else if (!req.user.zoom_enabled) q.where('s.source_type', '!=', 'zoom');
     })
     .orderBy('r.call_duration', 'desc')
     .select(
