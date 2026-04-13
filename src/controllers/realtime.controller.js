@@ -80,7 +80,11 @@ exports.getAgents = asyncHandler(async (req, res) => {
 
 /**
  * GET /api/realtime/agent-calls?agent_id=X&date=YYYY-MM-DD
- * Devuelve top-20 llamadas >1min del agente, con info de selección si ya existe.
+ * Devuelve las llamadas del agente para esa fecha.
+ *
+ * Lado Aware: consulta Kraken en tiempo real; si no retorna nada, cae al DB.
+ * Lado Zoom (solo zoom_enabled): siempre del DB (ya escaneado).
+ * Retorna { data: aware[], zoom_data: zoom[] } para activar split view.
  */
 exports.getAgentCalls = asyncHandler(async (req, res) => {
   const { agent_id, date } = req.query;
@@ -89,33 +93,101 @@ exports.getAgentCalls = asyncHandler(async (req, res) => {
   }
   const clientCodes = req.user.client_codes || [];
 
+  // ── Lado Aware: Kraken (tiempo real) ────────────────────────────────────
   const calls = await RealtimeScanService.getCallsByAgent(date, agent_id, clientCodes);
 
   const hashes = calls.map((c) => crypto.createHash('sha256').update(c.audio_url).digest('hex'));
 
-  const existing = await db('recordings as r')
-    .leftJoin('audit_selections as a', function () {
-      this.on('a.recording_id', '=', 'r.id')
-          .andOn('a.auditor_id', '=', db.raw('?', [req.user.id]));
-    })
-    .whereIn('r.file_path_hash', hashes)
-    .select('r.file_path_hash', 'a.id as selection_id', 'a.status as selection_status');
+  const existing = hashes.length
+    ? await db('recordings as r')
+        .leftJoin('audit_selections as a', function () {
+          this.on('a.recording_id', '=', 'r.id')
+              .andOn('a.auditor_id', '=', db.raw('?', [req.user.id]));
+        })
+        .whereIn('r.file_path_hash', hashes)
+        .select('r.file_path_hash', 'a.id as selection_id', 'a.status as selection_status')
+    : [];
 
   const existingMap = {};
-  for (const row of existing) {
-    existingMap[row.file_path_hash] = row;
-  }
+  for (const row of existing) existingMap[row.file_path_hash] = row;
 
-  const data = calls.map((call, i) => ({
+  let awareData = calls.map((call, i) => ({
     id:               null,
     call_duration:    call.duration,
     call_phone:       call.call_phone,
+    source_type:      'aware',
     selection_id:     existingMap[hashes[i]]?.selection_id || null,
     selection_status: existingMap[hashes[i]]?.selection_status || null,
     _realtime_call:   call,
   }));
 
-  res.json({ data, count: data.length });
+  // Fallback al DB si Kraken no retornó nada
+  if (awareData.length === 0) {
+    const dbAware = await db('recordings as r')
+      .join('aware_sources as s', 'r.aware_source_id', 's.id')
+      .join('clients as c', 's.client_id', 'c.id')
+      .leftJoin('audit_selections as a', function () {
+        this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
+      })
+      .where('r.agent_id', agent_id)
+      .where('r.file_date', date)
+      .where('s.source_type', '!=', 'zoom')
+      .where('r.call_duration', '>', 0)
+      .orderBy('r.call_duration', 'desc')
+      .limit(10)
+      .select(
+        'r.id', 'r.call_duration', 'r.call_phone',
+        'c.code as client_code', db.raw("'aware' as source_type"),
+        'a.id as selection_id', 'a.status as selection_status'
+      );
+    awareData = dbAware;
+  }
+
+  // ── Lado Zoom: siempre del DB ────────────────────────────────────────────
+  let zoomData = null;
+  if (req.user.zoom_enabled) {
+    const dbZoom = await db('recordings as r')
+      .join('aware_sources as s', 'r.aware_source_id', 's.id')
+      .join('clients as c', 's.client_id', 'c.id')
+      .leftJoin('audit_selections as a', function () {
+        this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
+      })
+      .where('r.agent_id', agent_id)
+      .where('r.file_date', date)
+      .where('s.source_type', 'zoom')
+      .where('r.call_duration', '>', 0)
+      .orderBy('r.call_duration', 'desc')
+      .select(
+        'r.id', 'r.call_duration', 'r.call_phone',
+        'c.code as client_code', db.raw("'zoom' as source_type"),
+        'a.id as selection_id', 'a.status as selection_status'
+      )
+      .limit(10);
+
+    // Incluir grabaciones auditadas fuera del top 10
+    const zoomIds = new Set(dbZoom.map((r) => r.id));
+    const auditedZoom = await db('recordings as r')
+      .join('aware_sources as s', 'r.aware_source_id', 's.id')
+      .join('clients as c', 's.client_id', 'c.id')
+      .join('audit_selections as a', function () {
+        this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
+      })
+      .where('r.agent_id', agent_id)
+      .where('r.file_date', date)
+      .where('s.source_type', 'zoom')
+      .select(
+        'r.id', 'r.call_duration', 'r.call_phone',
+        'c.code as client_code', db.raw("'zoom' as source_type"),
+        'a.id as selection_id', 'a.status as selection_status'
+      );
+    for (const row of auditedZoom) {
+      if (!zoomIds.has(row.id)) dbZoom.push(row);
+    }
+
+    zoomData = dbZoom;
+  }
+
+  res.json({ data: awareData, zoom_data: zoomData, count: awareData.length });
 });
 
 exports.selectCall = asyncHandler(async (req, res) => {
