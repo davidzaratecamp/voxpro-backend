@@ -91,10 +91,32 @@ exports.byAgent = asyncHandler(async (req, res) => {
       'a.id as selection_id', 'a.status as selection_status'
     );
 
-  // Obama con zoom_enabled: devolver 10 Aware + 10 Zoom por separado
+  // Obama con zoom_enabled: devolver 10 Aware + 10 Zoom por separado.
+  // Las grabaciones Aware de agentes Obama pueden estar bajo cualquier cliente
+  // (obama, claro_hogar, lv…), por eso no aplicamos el filtro de clientCodes
+  // en el lado Aware — mostramos todas las del agente ese día.
   if (isObama && req.user.zoom_enabled) {
+    const awareQuery = () => db('recordings as r')
+      .join('aware_sources as s', 'r.aware_source_id', 's.id')
+      .join('clients as c', 's.client_id', 'c.id')
+      .leftJoin('audit_selections as a', function () {
+        this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
+      })
+      .where('r.agent_id', agent_id)
+      .where('r.file_date', date)
+      .where('s.source_type', '!=', 'zoom')
+      .where('r.call_duration', '>', 0)
+      .orderBy('r.call_duration', 'desc')
+      .select(
+        'r.id', 'r.file_name', 'r.call_duration',
+        'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
+        'c.code as client_code', 's.source_type',
+        'a.id as selection_id', 'a.status as selection_status'
+      )
+      .limit(10);
+
     const [aware, zoom] = await Promise.all([
-      baseQuery().where('s.source_type', '!=', 'zoom').where('r.call_duration', '>', 0).limit(10),
+      awareQuery(),
       baseQuery().where('s.source_type', 'zoom').where('r.call_duration', '>', 0).limit(10),
     ]);
     return res.json({ data: aware, zoom_data: zoom });
