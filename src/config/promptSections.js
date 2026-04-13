@@ -58,6 +58,12 @@ Marca un criterio como "na" cuando:
 
 NO marques "na" si el agente pudo cumplir el criterio pero no lo hizo. Solo usa "na" cuando es genuinamente imposible o inaplicable.`;
 
+const SECTION_CONTINUATION_CALL_RULE = `### Regla de Llamada de Continuación (CRÍTICO):
+Si la grabación es claramente una continuación de una conversación previa con el mismo cliente (el agente NO se presenta, NO saluda, y la conversación empieza en medio de un tema ya en curso), entonces:
+- "Inicio de la llamada" → N/A. No se puede exigir saludo ni presentación cuando la llamada ya estaba en curso.
+- Evalúa los demás criterios normalmente según lo que ocurre en esta grabación.
+- Indicios de llamada de continuación: el agente dice "te voy a hacer las preguntas" o "listo, entonces..." sin presentarse, el cliente ya conoce al agente, se retoma un tema anterior sin introducción.`;
+
 const SECTION_DROPPED_CALL_RULE = `### Regla de Llamada Cortada por el Cliente (CRÍTICO):
 Si el CLIENTE termina/cuelga la llamada prematuramente (por estar en el trabajo, ocupado, no poder hablar, etc.), TODOS los criterios que dependían de continuar la llamada deben marcarse como "na". Esto incluye:
 - Cierre de la llamada, cierre de fase, cierre de venta → N/A (el agente no tuvo oportunidad de cerrar)
@@ -184,6 +190,7 @@ module.exports = {
   SECTION_EVALUATION_PHILOSOPHY,
   SECTION_HIGH_IMPACT_RULES,
   SECTION_NA_RULES,
+  SECTION_CONTINUATION_CALL_RULE,
   SECTION_DROPPED_CALL_RULE,
   SECTION_THIRD_PARTY_RULE,
   SECTION_ADDITIONAL_RULES,
