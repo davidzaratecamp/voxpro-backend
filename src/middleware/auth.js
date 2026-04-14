@@ -16,7 +16,7 @@ const auth = (req, res, next) => {
       name: payload.name,
       role: payload.role,
       client_codes: payload.client_codes,
-      zoom_enabled: !!payload.zoom_enabled,
+      zoom_enabled: Array.isArray(payload.client_codes) ? payload.client_codes.includes('obama') : false,
     };
     next();
   } catch (err) {
