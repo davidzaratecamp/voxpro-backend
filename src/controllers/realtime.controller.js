@@ -48,17 +48,28 @@ exports.getAgents = asyncHandler(async (req, res) => {
   const date = req.query.date || new Date().toISOString().slice(0, 10);
   const clientCodes = req.user.client_codes || [];
 
-  const calls = await RealtimeScanService.getCalls(date, clientCodes);
+  const [calls, zoomRows] = await Promise.all([
+    RealtimeScanService.getCalls(date, clientCodes),
+    req.user.zoom_enabled
+      ? db('recordings as r')
+          .join('aware_sources as s', 'r.aware_source_id', 's.id')
+          .where('s.source_type', 'zoom')
+          .where('r.file_date', date)
+          .whereNotNull('r.agent_id')
+          .where('r.agent_id', '!=', '-1')
+          .select('r.agent_id', 'r.agent_name', 'r.call_duration')
+      : Promise.resolve([]),
+  ]);
 
   // Resolver agent_ids permitidos (null = sin restricción, [] = ninguno, [ids...] = filtrar)
   const allowedIds = await resolveAgentIds(req.user.id);
   const allowedSet = allowedIds ? new Set(allowedIds.map(String)) : null;
 
   const agentMap = new Map();
+
+  // Aware (Kraken)
   for (const call of calls) {
-    // Ignorar llamadas sin agente asignado o con IDs inválidos (e.g. -1)
     if (!call.agent_id || Number(call.agent_id) < 0) continue;
-    // Filtrar por agents asignados (coordinador / formador)
     if (allowedSet && !allowedSet.has(String(call.agent_id))) continue;
     const key = call.agent_id;
     if (!agentMap.has(key)) {
@@ -72,6 +83,23 @@ exports.getAgents = asyncHandler(async (req, res) => {
     }
     agentMap.get(key).recording_count++;
     if ((call.duration || 0) > 120) agentMap.get(key).qualified_count++;
+  }
+
+  // Zoom (voxpro DB)
+  for (const row of zoomRows) {
+    if (allowedSet && !allowedSet.has(String(row.agent_id))) continue;
+    const key = row.agent_id;
+    if (!agentMap.has(key)) {
+      agentMap.set(key, {
+        agent_id:        row.agent_id,
+        agent_name:      row.agent_name,
+        client_code:     null,
+        recording_count: 0,
+        qualified_count: 0,
+      });
+    }
+    agentMap.get(key).recording_count++;
+    if ((row.call_duration || 0) > 120) agentMap.get(key).qualified_count++;
   }
 
   const agents = Array.from(agentMap.values())
