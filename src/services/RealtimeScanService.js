@@ -357,6 +357,99 @@ class RealtimeScanService {
   }
 
   /**
+   * Busca llamadas en Kraken por número de teléfono para una fecha dada.
+   * Solo fuentes con schema estándar (awareccm no tiene campo de teléfono).
+   */
+  async getCallsByPhone(date, phone, clientCodes = []) {
+    const targetDate = date || new Date().toISOString().slice(0, 10);
+    const phonePattern = `%${phone.replace(/\D/g, '')}%`;
+
+    const seen = new Set();
+    const sourcesToQuery = [];
+    for (const src of AWARE_SOURCES) {
+      if (src.schema === 'awareccm') continue;
+      if (clientCodes.length && !clientCodes.includes(src.clientCode)) continue;
+      const key = `${src.db.host}:${src.db.database}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      sourcesToQuery.push(src);
+    }
+
+    const results = await Promise.allSettled(
+      sourcesToQuery.map(async (src) => {
+        let tunnel = null;
+        let pgClient = null;
+        try {
+          tunnel = await openTunnel(src.db.host, src.db.port);
+          pgClient = new PGClient({
+            host: '127.0.0.1',
+            port: tunnel.port,
+            database: src.db.database,
+            user: src.db.user,
+            password: src.db.password,
+            statement_timeout: 30000,
+          });
+          await pgClient.connect();
+
+          const result = await pgClient.query(
+            `SELECT
+               rl.registro_llamada_id,
+               rl.agente_id::text          AS agent_id,
+               e.empleado_name             AS agent_name,
+               rl.call_time                AS duration,
+               rl.registro_llamada_fecha   AS file_date,
+               rl.proyecto_id,
+               rl.registro_llamada_fono    AS phone,
+               rl.call_id
+             FROM registro_llamada rl
+             LEFT JOIN empleado e ON rl.agente_id = e.empleado_rut
+             WHERE rl.registro_llamada_fecha = $1
+               AND rl.registro_llamada_fono LIKE $2
+               AND rl.call_time > 0
+               AND rl.call_id > 0
+             ORDER BY rl.call_time DESC
+             LIMIT 20`,
+            [targetDate, phonePattern],
+          );
+
+          return result.rows.map((r) => {
+            const audioUrl = buildStandardAudioUrl(src.audioBaseUrl, r.file_date, r.phone, r.call_id);
+            return {
+              sourceKey:           `${src.db.host}:${src.db.database}`,
+              folder:              src.folder,
+              clientCode:          src.clientCode,
+              clientName:          src.clientName,
+              schema:              src.schema,
+              audioBaseUrl:        src.audioBaseUrl,
+              registro_llamada_id: r.registro_llamada_id,
+              agent_id:            r.agent_id,
+              agent_name:          r.agent_name,
+              duration:            r.duration,
+              file_date:           toDateStr(r.file_date),
+              proyecto_id:         r.proyecto_id,
+              hangup_src:          null,
+              call_phone:          r.phone,
+              audio_url:           audioUrl,
+              file_name:           audioUrl.split('/').pop(),
+            };
+          });
+        } finally {
+          if (pgClient) await pgClient.end().catch(() => {});
+          if (tunnel) { tunnel.server.close(); tunnel.sshClient.end(); }
+        }
+      }),
+    );
+
+    const allCalls = [];
+    for (const r of results) {
+      if (r.status === 'fulfilled') allCalls.push(...r.value);
+      else logger.error('getCallsByPhone error', { message: r.reason?.message });
+    }
+
+    return allCalls.sort((a, b) => (b.duration || 0) - (a.duration || 0));
+  }
+
+  /**
    * Descarga el audio de una URL HTTPS de Aware.
    */
   async downloadAudio(audioUrl) {

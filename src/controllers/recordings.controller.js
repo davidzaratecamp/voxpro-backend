@@ -169,30 +169,63 @@ exports.byAgentPhone = asyncHandler(async (req, res) => {
   }
   const clientCodes = req.user.client_codes || [];
   const db = require('../database/connection');
+  const crypto = require('crypto');
 
-  const recordings = await db('recordings as r')
-    .join('aware_sources as s', 'r.aware_source_id', 's.id')
-    .join('clients as c', 's.client_id', 'c.id')
-    .leftJoin('audit_selections as a', function () {
-      this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
-    })
-    .where('r.agent_id', agent_id)
-    .where('r.file_date', date)
-    .where('r.call_phone', phone)
-    .whereIn('c.code', clientCodes)
-    .modify((q) => {
-      if (source === 'zoom') q.where('s.source_type', 'zoom');
-      else if (!req.user.zoom_enabled) q.where('s.source_type', '!=', 'zoom');
-    })
-    .orderBy('r.call_duration', 'desc')
-    .select(
-      'r.id', 'r.file_name', 'r.call_duration',
-      'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
-      'c.code as client_code', 's.source_type',
-      'a.id as selection_id', 'a.status as selection_status'
-    );
+  // Zoom: siempre desde voxpro DB
+  if (source === 'zoom') {
+    const recordings = await db('recordings as r')
+      .join('aware_sources as s', 'r.aware_source_id', 's.id')
+      .join('clients as c', 's.client_id', 'c.id')
+      .leftJoin('audit_selections as a', function () {
+        this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
+      })
+      .where('r.agent_id', agent_id)
+      .where('r.file_date', date)
+      .where('r.call_phone', 'like', `%${phone.trim()}%`)
+      .where('s.source_type', 'zoom')
+      .orderBy('r.call_duration', 'desc')
+      .select(
+        'r.id', 'r.file_name', 'r.call_duration',
+        'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
+        'c.code as client_code', 's.source_type',
+        'a.id as selection_id', 'a.status as selection_status'
+      );
+    return res.json({ data: recordings });
+  }
 
-  res.json({ data: recordings });
+  // Aware: buscar en Kraken en tiempo real
+  const RealtimeScanService = require('../services/RealtimeScanService');
+  const calls = await RealtimeScanService.getCallsByPhone(date, phone.trim(), clientCodes);
+  const agentCalls = calls.filter((c) => String(c.agent_id) === String(agent_id));
+
+  const hashes = agentCalls.map((c) => crypto.createHash('sha256').update(c.audio_url).digest('hex'));
+  const existing = hashes.length
+    ? await db('recordings as r')
+        .leftJoin('audit_selections as a', function () {
+          this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
+        })
+        .whereIn('r.file_path_hash', hashes)
+        .select('r.file_path_hash', 'a.id as selection_id', 'a.status as selection_status')
+    : [];
+
+  const existingMap = {};
+  for (const row of existing) existingMap[row.file_path_hash] = row;
+
+  const data = agentCalls.map((call, i) => ({
+    id:               null,
+    call_duration:    call.duration,
+    call_phone:       call.call_phone,
+    file_date:        call.file_date,
+    agent_id:         call.agent_id,
+    agent_name:       call.agent_name,
+    client_code:      call.clientCode,
+    source_type:      'aware',
+    selection_id:     existingMap[hashes[i]]?.selection_id || null,
+    selection_status: existingMap[hashes[i]]?.selection_status || null,
+    _realtime_call:   call,
+  }));
+
+  res.json({ data });
 });
 
 exports.byPhone = asyncHandler(async (req, res) => {
@@ -202,7 +235,73 @@ exports.byPhone = asyncHandler(async (req, res) => {
   }
   const clientCodes = req.user.client_codes || [];
   const db = require('../database/connection');
+  const crypto = require('crypto');
 
+  // Tab Aware con zoom_enabled: buscar en Kraken para hoy + DB para auditadas históricas
+  if (source !== 'zoom' && req.user.zoom_enabled) {
+    const today = new Date().toISOString().slice(0, 10);
+    const RealtimeScanService = require('../services/RealtimeScanService');
+
+    const [krakenCalls, dbRecordings] = await Promise.all([
+      RealtimeScanService.getCallsByPhone(today, phone.trim(), clientCodes),
+      db('recordings as r')
+        .join('aware_sources as s', 'r.aware_source_id', 's.id')
+        .join('clients as c', 's.client_id', 'c.id')
+        .join('audit_selections as a', function () {
+          this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
+        })
+        .where('r.call_phone', 'like', `%${phone.trim()}%`)
+        .whereIn('c.code', clientCodes)
+        .where('s.source_type', '!=', 'zoom')
+        .orderBy('r.file_date', 'desc')
+        .limit(50)
+        .select(
+          'r.id', 'r.file_name', 'r.call_duration',
+          'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
+          'c.code as client_code', 'c.name as client_name',
+          db.raw("'aware' as source_type"),
+          'a.id as selection_id', 'a.status as selection_status'
+        ),
+    ]);
+
+    // Cruzar Kraken con DB para ver selection status
+    const hashes = krakenCalls.map((c) => crypto.createHash('sha256').update(c.audio_url).digest('hex'));
+    const existing = hashes.length
+      ? await db('recordings as r')
+          .leftJoin('audit_selections as a', function () {
+            this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
+          })
+          .whereIn('r.file_path_hash', hashes)
+          .select('r.file_path_hash', 'a.id as selection_id', 'a.status as selection_status')
+      : [];
+    const existingMap = {};
+    for (const row of existing) existingMap[row.file_path_hash] = row;
+
+    const krakenData = krakenCalls.map((call, i) => ({
+      id:               null,
+      call_duration:    call.duration,
+      call_phone:       call.call_phone,
+      file_date:        call.file_date,
+      agent_id:         call.agent_id,
+      agent_name:       call.agent_name,
+      client_code:      call.clientCode,
+      source_type:      'aware',
+      selection_id:     existingMap[hashes[i]]?.selection_id || null,
+      selection_status: existingMap[hashes[i]]?.selection_status || null,
+      _realtime_call:   call,
+    }));
+
+    // Combinar: Kraken (hoy) primero, luego auditadas históricas
+    const dbHashes = new Set(krakenCalls.map((c) => c.audio_url));
+    const combined = [
+      ...krakenData,
+      ...dbRecordings,
+    ];
+
+    return res.json({ data: combined, count: combined.length });
+  }
+
+  // Zoom o usuarios sin zoom_enabled: siempre desde voxpro DB
   const recordings = await db('recordings as r')
     .join('aware_sources as s', 'r.aware_source_id', 's.id')
     .join('clients as c', 's.client_id', 'c.id')
@@ -214,7 +313,7 @@ exports.byPhone = asyncHandler(async (req, res) => {
     .modify((q) => {
       if (source === 'zoom') {
         q.where('s.source_type', 'zoom');
-      } else if (!req.user.zoom_enabled) {
+      } else {
         q.where('s.source_type', '!=', 'zoom');
       }
     })
