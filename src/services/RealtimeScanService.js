@@ -272,7 +272,7 @@ class RealtimeScanService {
                FROM registro_llamada rl
                WHERE rl.registro_llamada_fecha = $1
                  AND rl.agente_id::text = $2
-                 AND rl.time_speaking > 60
+                 AND rl.time_speaking > 180
                  AND rl.audiofile IS NOT NULL
                ORDER BY rl.time_speaking DESC`,
               [targetDate, String(agentId)],
@@ -310,7 +310,7 @@ class RealtimeScanService {
                LEFT JOIN empleado e ON rl.agente_id = e.empleado_rut
                WHERE rl.registro_llamada_fecha = $1
                  AND rl.agente_id::text = $2
-                 AND rl.call_time > 60
+                 AND rl.call_time > 180
                  AND rl.call_id > 0
                ORDER BY rl.call_time DESC`,
               [targetDate, String(agentId)],
