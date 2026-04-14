@@ -39,20 +39,20 @@ function start() {
   // Job intradiario: escaneo Zoom de HOY cada 2 horas (7-21h)
   // Permite ver las grabaciones del día actual sin esperar al día siguiente.
   if (process.env.ZOOM_ACCOUNT_ID) {
-    zoomTodayTask = cron.schedule('0 7-21 * * *', async () => {
+    zoomTodayTask = cron.schedule('*/30 10-21 * * *', async () => {
       const today = new Date().toISOString().slice(0, 10);
 
-      // Si ya hay ≥10 grabaciones Zoom >3min para hoy, no hace falta escanear
+      // Si ya hay ≥10 grabaciones Zoom >10min para hoy, no hace falta escanear
       const { count } = await db('recordings as r')
         .join('aware_sources as s', 'r.aware_source_id', 's.id')
         .where('s.source_type', 'zoom')
         .where('r.file_date', today)
-        .where('r.call_duration', '>', 180)
+        .where('r.call_duration', '>', 600)
         .count('* as count')
         .first();
 
       if (Number(count) >= 10) {
-        logger.info(`Job intradiario: ya hay ${count} grabaciones Zoom >3min para hoy, omitiendo scan`);
+        logger.info(`Job intradiario: ya hay ${count} grabaciones Zoom >10min para hoy, omitiendo scan`);
         return;
       }
 
@@ -64,7 +64,7 @@ function start() {
         logger.error('Job intradiario: Zoom fallido', err);
       }
     });
-    logger.info('Scheduler: job intradiario Zoom activado (cada 1h, 7-21h)');
+    logger.info('Scheduler: job intradiario Zoom activado (cada 30min, 10-21h)');
   }
 
   logger.info(`Scheduler iniciado - job diario programado: ${schedule}`);
