@@ -3,10 +3,12 @@ const config = require('../config');
 const ScannerService = require('../services/ScannerService');
 const ZoomScannerService = require('../services/ZoomScannerService');
 const AuditService = require('../services/AuditService');
+const db = require('../database/connection');
 const logger = require('../utils/logger');
 
 let scanTask = null;
 let zoomTodayTask = null;
+let cleanupTask = null;
 
 function start() {
   const schedule = config.scan.cronSchedule;
@@ -67,6 +69,27 @@ function start() {
     logger.info('Scheduler: job intradiario Zoom activado (cada 30min, 10-21h)');
   }
 
+  // Job de limpieza: borra grabaciones Aware sin auditar de más de 30 días
+  // Las auditadas (en audit_selections) nunca se tocan.
+  cleanupTask = cron.schedule('30 3 * * *', async () => {
+    logger.info('Job limpieza: eliminando grabaciones Aware sin auditar >30 días');
+    try {
+      const cutoff = new Date();
+      cutoff.setDate(cutoff.getDate() - 30);
+      const cutoffStr = cutoff.toISOString().slice(0, 10);
+
+      const deleted = await db('recordings')
+        .whereNotIn('id', db('audit_selections').select('recording_id').whereNotNull('recording_id'))
+        .whereRaw('aware_source_id IN (SELECT id FROM aware_sources WHERE source_type != ?)', ['zoom'])
+        .where('file_date', '<', cutoffStr)
+        .delete();
+
+      logger.info(`Job limpieza: ${deleted} grabaciones Aware eliminadas (anteriores a ${cutoffStr})`);
+    } catch (err) {
+      logger.error('Job limpieza: error', err);
+    }
+  });
+
   logger.info(`Scheduler iniciado - job diario programado: ${schedule}`);
 }
 
@@ -78,6 +101,10 @@ function stop() {
   if (zoomTodayTask) {
     zoomTodayTask.stop();
     zoomTodayTask = null;
+  }
+  if (cleanupTask) {
+    cleanupTask.stop();
+    cleanupTask = null;
   }
   logger.info('Scheduler detenido');
 }

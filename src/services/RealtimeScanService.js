@@ -353,7 +353,7 @@ class RealtimeScanService {
 
     return allCalls
       .sort((a, b) => (b.duration || 0) - (a.duration || 0))
-      .slice(0, 20);
+      .slice(0, 10);
   }
 
   /**
