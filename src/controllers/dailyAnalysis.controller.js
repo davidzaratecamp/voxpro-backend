@@ -37,18 +37,36 @@ exports.getMetrics = asyncHandler(async (req, res) => {
       .select('a.agent_id', 'a.agent_name', 'a.score', 'a.status'),
   ]);
 
-  // 4. Errores frecuentes del día desde qa_evaluations
-  const qaErrors = await db('qa_evaluations as q')
-    .join('audit_selections as a', 'q.selection_id', 'a.id')
-    .join('recordings as r', 'a.recording_id', 'r.id')
+  // 4. Errores frecuentes del día desde qa_evaluations (criteria es JSON)
+  const qaRaw = await db('qa_evaluations as q')
+    .join('recordings as r', 'q.recording_id', 'r.id')
+    .join('audit_selections as a', 'a.recording_id', 'r.id')
     .where(db.raw('DATE(r.file_date)'), date)
     .whereIn('a.client_code', clientCodes)
-    .where('q.score', 0)
-    .whereNotNull('q.criterion_name')
-    .groupBy('q.criterion_name')
-    .orderBy('cnt', 'desc')
-    .limit(10)
-    .select('q.criterion_name', db.raw('count(*) as cnt'));
+    .whereNotNull('q.criteria')
+    .select('q.criteria');
+
+  const errorMap = new Map();
+  for (const row of qaRaw) {
+    let criteria;
+    try {
+      criteria = typeof row.criteria === 'string' ? JSON.parse(row.criteria) : row.criteria;
+    } catch { continue; }
+    for (const item of (criteria.general || [])) {
+      if (!item.cumple && !item.na) {
+        errorMap.set(item.label, (errorMap.get(item.label) || 0) + 1);
+      }
+    }
+    for (const item of (criteria.highImpact || [])) {
+      if (!item.cumple) {
+        errorMap.set(item.label, (errorMap.get(item.label) || 0) + 1);
+      }
+    }
+  }
+  const qaErrors = Array.from(errorMap.entries())
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 10)
+    .map(([label, count]) => ({ criterion_name: label, cnt: count }));
 
   // Construir mapa de agentes
   const agentMap = new Map();
