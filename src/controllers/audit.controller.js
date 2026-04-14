@@ -17,12 +17,29 @@ const execFileAsync = promisify(execFile);
  * Verifica que la selección pertenece al auditor que hace la petición
  * y que su client_code está dentro de sus client_codes autorizados.
  * Retorna un objeto de error listo para responder, o null si el acceso es válido.
+ *
+ * Para usuarios zoom_enabled: también permite acceso a grabaciones de otros clientes
+ * si el agente tiene extensión Zoom bajo un cliente autorizado del usuario.
  */
-function checkAccess(selection, req) {
+async function checkAccess(selection, req) {
   if (!selection) {
     return { status: 404, body: { error: true, message: 'Selección no encontrada' } };
   }
-  if (!req.user.client_codes.includes(selection.client_code)) {
+
+  const hasDirectAccess = req.user.client_codes.includes(selection.client_code);
+  let authorized = hasDirectAccess;
+
+  if (!hasDirectAccess && req.user.zoom_enabled && selection.agent_id) {
+    const agentInZoom = await db('agents as ag')
+      .join('clients as c', 'ag.client_id', 'c.id')
+      .where('ag.cedula', String(selection.agent_id))
+      .whereNotNull('ag.zoom_extension')
+      .whereIn('c.code', req.user.client_codes)
+      .first();
+    authorized = !!agentInZoom;
+  }
+
+  if (!authorized) {
     return { status: 403, body: { error: true, message: 'Acceso no autorizado' } };
   }
   if (req.user.role !== 'supervisor_calidad' && selection.auditor_id !== null && selection.auditor_id !== req.user.id) {
@@ -49,7 +66,23 @@ exports.selectOne = asyncHandler(async (req, res) => {
     .first();
 
   if (!recording) return res.status(404).json({ error: true, message: 'Grabación no encontrada' });
-  if (!req.user.client_codes.includes(recording.client_code)) {
+
+  // Verificar acceso: el usuario tiene el cliente directamente, O bien tiene zoom_enabled
+  // y el agente de la grabación tiene extensión Zoom bajo un cliente autorizado
+  // (caso: agentes Obama con grabaciones Aware en otros clientes como claro_hogar)
+  const hasDirectAccess = req.user.client_codes.includes(recording.client_code);
+  let hasZoomAgentAccess = false;
+  if (!hasDirectAccess && req.user.zoom_enabled) {
+    const agentInZoom = await db('agents as ag')
+      .join('aware_sources as s', 'ag.client_id', 's.client_id')
+      .join('clients as c', 'ag.client_id', 'c.id')
+      .where('ag.cedula', recording.agent_id)
+      .whereNotNull('ag.zoom_extension')
+      .whereIn('c.code', req.user.client_codes)
+      .first();
+    hasZoomAgentAccess = !!agentInZoom;
+  }
+  if (!hasDirectAccess && !hasZoomAgentAccess) {
     return res.status(403).json({ error: true, message: 'Acceso no autorizado' });
   }
 
@@ -106,7 +139,7 @@ exports.list = asyncHandler(async (req, res) => {
 
 exports.getById = asyncHandler(async (req, res) => {
   const selection = await AuditService.getById(req.params.id);
-  const err = checkAccess(selection, req);
+  const err = await checkAccess(selection, req);
   if (err) return res.status(err.status).json(err.body);
   res.json({ data: selection });
 });
@@ -132,7 +165,7 @@ exports.update = asyncHandler(async (req, res) => {
   }
 
   const selection = await AuditService.getById(req.params.id);
-  const err = checkAccess(selection, req);
+  const err = await checkAccess(selection, req);
   if (err) return res.status(err.status).json(err.body);
 
   const updated = await AuditService.updateSelection(req.params.id, { status, score, notes });
@@ -168,7 +201,7 @@ exports.agentsPerformance = asyncHandler(async (req, res) => {
 
 exports.analyze = asyncHandler(async (req, res) => {
   const selection = await AuditService.getById(req.params.id);
-  const err = checkAccess(selection, req);
+  const err = await checkAccess(selection, req);
   if (err) return res.status(err.status).json(err.body);
 
   const result = await AnalysisService.analyzeSelection(req.params.id);
@@ -177,7 +210,7 @@ exports.analyze = asyncHandler(async (req, res) => {
 
 exports.reanalyze = asyncHandler(async (req, res) => {
   const selection = await AuditService.getById(req.params.id);
-  const err = checkAccess(selection, req);
+  const err = await checkAccess(selection, req);
   if (err) return res.status(err.status).json(err.body);
 
   // Borrar análisis previo para forzar re-análisis limpio
@@ -191,7 +224,7 @@ exports.reanalyze = asyncHandler(async (req, res) => {
 
 exports.updateAnalysis = asyncHandler(async (req, res) => {
   const selection = await AuditService.getById(req.params.id);
-  const err = checkAccess(selection, req);
+  const err = await checkAccess(selection, req);
   if (err) return res.status(err.status).json(err.body);
 
   const { criteria, score } = req.body;
@@ -205,7 +238,7 @@ exports.updateAnalysis = asyncHandler(async (req, res) => {
 
 exports.getAnalysis = asyncHandler(async (req, res) => {
   const selection = await AuditService.getById(req.params.id);
-  const err = checkAccess(selection, req);
+  const err = await checkAccess(selection, req);
   if (err) return res.status(err.status).json(err.body);
 
   const results = await AnalysisService.getResults(req.params.id);
@@ -219,10 +252,10 @@ exports.streamAudio = asyncHandler(async (req, res) => {
   const selection = await db('audit_selections as a')
     .join('recordings as r', 'a.recording_id', 'r.id')
     .where('a.id', req.params.id)
-    .select('r.file_path', 'r.file_name', 'r.file_size', 'a.client_code', 'a.auditor_id')
+    .select('r.file_path', 'r.file_name', 'r.file_size', 'a.client_code', 'a.auditor_id', 'a.agent_id')
     .first();
 
-  const err = checkAccess(selection, req);
+  const err = await checkAccess(selection, req);
   if (err) return res.status(err.status).json(err.body);
 
   const sftp = new SFTPService();
