@@ -5,7 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const config = require('../config');
 const logger = require('../utils/logger');
-const { OBAMA_CUSTOMER_AGENTS, LV_CUSTOMER_PROYECTO } = require('../config/evaluationCriteria');
+const { LV_CUSTOMER_PROYECTO } = require('../config/evaluationCriteria');
+const { resolveObamaAgentCampaign } = require('../utils/agentUtils');
 const CriteriaService = require('./CriteriaService');
 const {
   SECTION_ROLE_DEFINITION,
@@ -56,14 +57,12 @@ const MAX_CONCURRENT = 3;
 
 /**
  * Mapea (clientCode, agentId, proyectoId) → campaign_key string.
- * Los criterios de routing (Obama customer vs ventas, LV customer vs ventas)
- * permanecen aquí — son lógica de routing, no datos de criterios.
+ * Para Obama: consulta la DB para ver si el agente está bajo un coordinador customer.
  */
-function resolveCampaignKey(clientCode, agentId, proyectoId) {
+async function resolveCampaignKey(clientCode, agentId, proyectoId) {
   if (clientCode === 'obama') {
-    return agentId && OBAMA_CUSTOMER_AGENTS.has(String(agentId))
-      ? 'obama_customer'
-      : 'obama_ventas';
+    const campaign = await resolveObamaAgentCampaign(agentId);
+    return campaign === 'customer' ? 'obama_customer' : 'obama_ventas';
   }
   if (clientCode === 'lv') {
     return proyectoId === LV_CUSTOMER_PROYECTO ? 'lv_customer' : 'lv_ventas';
@@ -88,7 +87,7 @@ class GeminiService {
    * @returns {{ transcription: string, evaluation: object }}
    */
   async analyzeCall(audioBuffer, clientCode, agentId, proyectoId, mimeType = 'audio/ogg') {
-    const campaignKey = resolveCampaignKey(clientCode, agentId, proyectoId);
+    const campaignKey = await resolveCampaignKey(clientCode, agentId, proyectoId);
     const criteria = await CriteriaService.getByKey(campaignKey);
 
     await this.semaphore.acquire();

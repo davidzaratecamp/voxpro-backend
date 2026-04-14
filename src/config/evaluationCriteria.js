@@ -281,23 +281,6 @@ const CRITERIA = {
 };
 
 /**
- * Cédulas de los agentes de Customer en Aware 30.
- * El resto de agentes de Obama (Aware 30, 31, 5) son Ventas.
- */
-const OBAMA_CUSTOMER_AGENTS = new Set([
-  '1000834615', // Hernandez Mendoza David Ismael
-  '1052837193', // Arguello Rodriguez Andres Felipe
-  '1032679644', // Beltran Viracacha Paula Nicole
-  '1028662379', // Ramirez Romero William Daniel
-  '1023373202', // Chapeton Ardila Juan Sebastian
-  '1001343678', // Arevalo Traslaviña Davinson Denet
-  '1030659472', // Cordoba Gil Brandon David
-  '1024600780', // Villalba Londoño Cristian David
-  '1032938838', // Alvarez Alba Carol Natalia
-  '1011093984', // Rodriguez Sierra Paola Alejandra
-]);
-
-/**
  * Proyecto IDs de LV en AWARE_30.
  * 34 = LV-VENTAS, 35 = LV_CUSTOMER, 36 = LV_COBROS (no auditable por ahora)
  */
@@ -316,10 +299,7 @@ const LV_VENTAS_PROYECTO = 34;
  */
 function getCriteria(clientCode, agentId, proyectoId) {
   if (clientCode === 'obama') {
-    if (agentId && OBAMA_CUSTOMER_AGENTS.has(String(agentId))) {
-      return CRITERIA.obama_customer;
-    }
-    return CRITERIA.obama_ventas;
+    return CRITERIA.obama_ventas; // routing dinámico via HC — ver resolveObamaAgentCampaign
   }
   if (clientCode === 'lv') {
     if (proyectoId === LV_CUSTOMER_PROYECTO) {
@@ -333,4 +313,4 @@ function getCriteria(clientCode, agentId, proyectoId) {
   return CRITERIA[clientCode] || null;
 }
 
-module.exports = { CRITERIA, OBAMA_CUSTOMER_AGENTS, LV_PROYECTO_IDS, LV_CUSTOMER_PROYECTO, LV_VENTAS_PROYECTO, getCriteria };
+module.exports = { CRITERIA, LV_PROYECTO_IDS, LV_CUSTOMER_PROYECTO, LV_VENTAS_PROYECTO, getCriteria };

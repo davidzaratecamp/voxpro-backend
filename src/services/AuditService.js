@@ -1,5 +1,6 @@
 const db = require('../database/connection');
-const { LV_PROYECTO_IDS, LV_CUSTOMER_PROYECTO, OBAMA_CUSTOMER_AGENTS } = require('../config/evaluationCriteria');
+const { LV_PROYECTO_IDS, LV_CUSTOMER_PROYECTO } = require('../config/evaluationCriteria');
+const { buildObamaAgentCampaignMap } = require('../utils/agentUtils');
 
 // Duración mínima en segundos para seleccionar llamadas
 const LV_MIN_DURATION = 60;
@@ -308,9 +309,9 @@ class AuditService {
    * Determina el tipo de campaña (ventas/customer) para Obama y LV.
    * @returns {string|null} 'ventas', 'customer', o null si no aplica
    */
-  _getCampaignType(clientCode, agentId, proyectoId) {
+  _getCampaignType(clientCode, agentId, proyectoId, obamaMap = {}) {
     if (clientCode === 'obama') {
-      return agentId && OBAMA_CUSTOMER_AGENTS.has(String(agentId)) ? 'customer' : 'ventas';
+      return obamaMap[String(agentId)] || 'ventas';
     }
     if (clientCode === 'lv') {
       return proyectoId === LV_CUSTOMER_PROYECTO ? 'customer' : 'ventas';
@@ -391,8 +392,9 @@ class AuditService {
 
     const rows = await query;
 
+    const obamaMap = await buildObamaAgentCampaignMap();
     for (const row of rows) {
-      row.campaign_type = this._getCampaignType(row.client_code, row.agent_id, row.proyecto_id);
+      row.campaign_type = this._getCampaignType(row.client_code, row.agent_id, row.proyecto_id, obamaMap);
     }
 
     return rows;
@@ -421,7 +423,8 @@ class AuditService {
       .first();
 
     if (row) {
-      row.campaign_type = this._getCampaignType(row.client_code, row.agent_id, row.proyecto_id);
+      const obamaMap = await buildObamaAgentCampaignMap();
+      row.campaign_type = this._getCampaignType(row.client_code, row.agent_id, row.proyecto_id, obamaMap);
     }
 
     return row;
@@ -516,8 +519,9 @@ class AuditService {
 
     const rows = await query;
 
+    const obamaMap = await buildObamaAgentCampaignMap();
     for (const row of rows) {
-      row.campaign_type = this._getCampaignType(row.client_code, row.agent_id, row.proyecto_id);
+      row.campaign_type = this._getCampaignType(row.client_code, row.agent_id, row.proyecto_id, obamaMap);
     }
 
     return rows;
