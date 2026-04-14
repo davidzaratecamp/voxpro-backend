@@ -155,7 +155,7 @@ exports.getAgentCalls = asyncHandler(async (req, res) => {
       .where('r.agent_id', agent_id)
       .where('r.file_date', date)
       .where('s.source_type', 'zoom')
-      .where('r.call_duration', '>', 0)
+      .where('r.call_duration', '>', 180)
       .orderBy('r.call_duration', 'desc')
       .select(
         'r.id', 'r.call_duration', 'r.call_phone',

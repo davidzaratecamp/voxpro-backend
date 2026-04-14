@@ -41,7 +41,22 @@ function start() {
   if (process.env.ZOOM_ACCOUNT_ID) {
     zoomTodayTask = cron.schedule('0 7-21 * * *', async () => {
       const today = new Date().toISOString().slice(0, 10);
-      logger.info(`Job intradiario: escaneando Zoom para hoy (${today})`);
+
+      // Si ya hay ≥10 grabaciones Zoom >3min para hoy, no hace falta escanear
+      const { count } = await db('recordings as r')
+        .join('aware_sources as s', 'r.aware_source_id', 's.id')
+        .where('s.source_type', 'zoom')
+        .where('r.file_date', today)
+        .where('r.call_duration', '>', 180)
+        .count('* as count')
+        .first();
+
+      if (Number(count) >= 10) {
+        logger.info(`Job intradiario: ya hay ${count} grabaciones Zoom >3min para hoy, omitiendo scan`);
+        return;
+      }
+
+      logger.info(`Job intradiario: escaneando Zoom para hoy (${today}) — grabaciones actuales: ${count}`);
       try {
         const result = await ZoomScannerService.run({ targetDate: today });
         logger.info('Job intradiario: Zoom completado', result);

@@ -134,7 +134,7 @@ exports.byAgent = asyncHandler(async (req, res) => {
 
     const [aware, zoom, auditedRows] = await Promise.all([
       awareQuery(),
-      baseQuery().where('s.source_type', 'zoom').where('r.call_duration', '>', 0).limit(10),
+      baseQuery().where('s.source_type', 'zoom').where('r.call_duration', '>', 180).limit(10),
       auditedByUser(),
     ]);
 
