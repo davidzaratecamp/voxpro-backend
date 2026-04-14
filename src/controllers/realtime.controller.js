@@ -67,13 +67,15 @@ exports.getAgents = asyncHandler(async (req, res) => {
         agent_name:      call.agent_name,
         client_code:     call.clientCode,
         recording_count: 0,
+        qualified_count: 0,
       });
     }
     agentMap.get(key).recording_count++;
+    if ((call.duration || 0) > 120) agentMap.get(key).qualified_count++;
   }
 
   const agents = Array.from(agentMap.values())
-    .sort((a, b) => (a.agent_name || '').localeCompare(b.agent_name || ''));
+    .sort((a, b) => (b.qualified_count - a.qualified_count) || (a.agent_name || '').localeCompare(b.agent_name || ''));
 
   res.json({ data: agents, count: agents.length, date });
 });
