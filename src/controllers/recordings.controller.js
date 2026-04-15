@@ -238,7 +238,7 @@ exports.byPhone = asyncHandler(async (req, res) => {
   const db = require('../database/connection');
   const crypto = require('crypto');
 
-  // Tab Aware con zoom_enabled: buscar en Kraken para hoy + DB para auditadas históricas
+  // Tab Aware con zoom_enabled: buscar en Kraken para hoy + DB para históricas
   if (source !== 'zoom' && req.user.zoom_enabled) {
     const today = new Date().toISOString().slice(0, 10);
     const RealtimeScanService = require('../services/RealtimeScanService');
@@ -248,12 +248,13 @@ exports.byPhone = asyncHandler(async (req, res) => {
       db('recordings as r')
         .join('aware_sources as s', 'r.aware_source_id', 's.id')
         .join('clients as c', 's.client_id', 'c.id')
-        .join('audit_selections as a', function () {
+        .leftJoin('audit_selections as a', function () {
           this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
         })
         .where('r.call_phone', 'like', `%${phone.trim()}%`)
         .whereIn('c.code', clientCodes)
         .where('s.source_type', '!=', 'zoom')
+        .where('r.file_date', '<', today)
         .orderBy('r.file_date', 'desc')
         .limit(50)
         .select(
