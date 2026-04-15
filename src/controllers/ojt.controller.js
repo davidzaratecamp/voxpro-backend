@@ -136,15 +136,15 @@ exports.create = asyncHandler(async (req, res) => {
     return res.status(400).json({ error: true, message: 'Uno o más aware_source_ids son inválidos' });
   }
 
-  // Verificar que no haya un agente activo con la misma cédula para este formador
+  // Verificar que no exista ya un registro con la misma cédula para este formador
   const existing = await db('ojt_agents')
-    .where({ cedula, formador_id: formadorId, status: 'activo' })
+    .where({ cedula, formador_id: formadorId })
     .first();
   if (existing) {
-    return res.status(409).json({
-      error: true,
-      message: 'Ya existe un agente activo con esa cédula asignado a este formador',
-    });
+    const msg = existing.status === 'activo'
+      ? 'Ya existe un agente activo con esa cédula asignado a este formador'
+      : 'Ya existe un registro con esa cédula para este formador. Edítalo para reactivarlo.';
+    return res.status(409).json({ error: true, message: msg });
   }
 
   const [id] = await db('ojt_agents').insert({
@@ -175,6 +175,20 @@ exports.update = asyncHandler(async (req, res) => {
   }
 
   const { nombre_completo, cedula, aware_source_ids, client_code, status, fecha_ingreso, fecha_graduacion, notas } = req.body;
+
+  // Formador no puede cambiar el client_code a uno que no tiene autorizado
+  if (client_code !== undefined && role === 'formador') {
+    const formadorRow = await db('users').where('id', userId).select('client_codes').first();
+    const allowed = typeof formadorRow.client_codes === 'string'
+      ? JSON.parse(formadorRow.client_codes)
+      : formadorRow.client_codes;
+    if (!allowed.includes(client_code)) {
+      return res.status(403).json({
+        error: true,
+        message: `No tienes autorización para asignar la campaña: ${client_code}`,
+      });
+    }
+  }
 
   const updates = { updated_at: db.fn.now() };
   if (nombre_completo   !== undefined) updates.nombre_completo = nombre_completo.trim();
