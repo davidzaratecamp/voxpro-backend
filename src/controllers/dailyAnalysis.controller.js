@@ -13,6 +13,15 @@ exports.getMetrics = asyncHandler(async (req, res) => {
   const date = req.query.date || new Date().toISOString().slice(0, 10);
   const clientCodes = req.user.client_codes || [];
 
+  // Si es coordinador, filtrar solo sus agentes
+  let coordinatorAgentIds = null;
+  if (req.user.role === 'coordinator') {
+    const coordUser = await db('users').where('id', req.user.id).first('agent_ids');
+    const raw = coordUser?.agent_ids;
+    const ids = Array.isArray(raw) ? raw : (typeof raw === 'string' ? JSON.parse(raw || '[]') : []);
+    coordinatorAgentIds = ids.map(String);
+  }
+
   // 1. Llamadas Aware desde Kraken
   const [calls, zoomRows, audits] = await Promise.all([
     RealtimeScanService.getCalls(date, clientCodes),
@@ -25,6 +34,9 @@ exports.getMetrics = asyncHandler(async (req, res) => {
           .where('r.file_date', date)
           .whereNotNull('r.agent_id')
           .where('r.agent_id', '!=', '-1')
+          .modify((q) => {
+            if (coordinatorAgentIds) q.whereIn('r.agent_id', coordinatorAgentIds);
+          })
           .select('r.agent_id', 'r.agent_name', 'r.call_duration')
       : Promise.resolve([]),
 
@@ -34,6 +46,9 @@ exports.getMetrics = asyncHandler(async (req, res) => {
       .where(db.raw('DATE(r.file_date)'), date)
       .whereIn('a.client_code', clientCodes)
       .whereNotNull('a.score')
+      .modify((q) => {
+        if (coordinatorAgentIds) q.whereIn('a.agent_id', coordinatorAgentIds);
+      })
       .select('a.agent_id', 'a.agent_name', 'a.score', 'a.status'),
   ]);
 
@@ -44,6 +59,9 @@ exports.getMetrics = asyncHandler(async (req, res) => {
     .where(db.raw('DATE(r.file_date)'), date)
     .whereIn('a.client_code', clientCodes)
     .whereNotNull('q.criteria')
+    .modify((q) => {
+      if (coordinatorAgentIds) q.whereIn('a.agent_id', coordinatorAgentIds);
+    })
     .select('q.criteria');
 
   const errorMap = new Map();
@@ -90,6 +108,7 @@ exports.getMetrics = asyncHandler(async (req, res) => {
   };
 
   for (const call of calls) {
+    if (coordinatorAgentIds && !coordinatorAgentIds.includes(String(call.agent_id))) continue;
     const a = getAgent(call.agent_id, call.agent_name);
     if (!a) continue;
     a.total_calls++;
