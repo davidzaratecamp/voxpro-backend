@@ -42,7 +42,7 @@ function start() {
   // Permite ver las grabaciones del día actual sin esperar al día siguiente.
   if (process.env.ZOOM_ACCOUNT_ID) {
     zoomTodayTask = cron.schedule('*/30 10-21 * * *', async () => {
-      const today = new Date().toISOString().slice(0, 10);
+      const today = new Date(Date.now() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10);
 
       // Si ya hay ≥10 grabaciones Zoom >10min para hoy, no hace falta escanear
       const { count } = await db('recordings as r')
