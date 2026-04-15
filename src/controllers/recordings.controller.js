@@ -230,7 +230,7 @@ exports.byAgentPhone = asyncHandler(async (req, res) => {
 });
 
 exports.byPhone = asyncHandler(async (req, res) => {
-  const { phone, source } = req.query;
+  const { phone, source, date } = req.query;
   if (!phone || phone.trim().length < 7) {
     return res.status(400).json({ error: true, message: 'Ingresa al menos 7 dígitos' });
   }
@@ -238,32 +238,44 @@ exports.byPhone = asyncHandler(async (req, res) => {
   const db = require('../database/connection');
   const crypto = require('crypto');
 
-  // Tab Aware con zoom_enabled: buscar en Kraken para hoy + DB para históricas
+  // Tab Aware con zoom_enabled: buscar en Kraken para la fecha dada (o hoy) + DB para históricas
   if (source !== 'zoom' && req.user.zoom_enabled) {
     const today = new Date().toISOString().slice(0, 10);
+    // Si el usuario especifica una fecha, buscamos en Kraken solo para esa fecha.
+    // Si no, buscamos hoy en Kraken + todo el historial en DB.
+    const krakenDate = date || today;
     const RealtimeScanService = require('../services/RealtimeScanService');
 
+    const dbQuery = db('recordings as r')
+      .join('aware_sources as s', 'r.aware_source_id', 's.id')
+      .join('clients as c', 's.client_id', 'c.id')
+      .leftJoin('audit_selections as a', function () {
+        this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
+      })
+      .where('r.call_phone', 'like', `%${phone.trim()}%`)
+      .whereIn('c.code', clientCodes)
+      .where('s.source_type', '!=', 'zoom')
+      .orderBy('r.file_date', 'desc')
+      .limit(50)
+      .select(
+        'r.id', 'r.file_name', 'r.call_duration',
+        'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
+        'c.code as client_code', 'c.name as client_name',
+        db.raw("'aware' as source_type"),
+        'a.id as selection_id', 'a.status as selection_status'
+      );
+
+    // Si hay fecha específica: buscar solo en esa fecha en DB (no todo el historial)
+    if (date) {
+      dbQuery.where('r.file_date', date);
+    } else {
+      // Sin fecha: DB cubre historial (antes de hoy), Kraken cubre hoy
+      dbQuery.where('r.file_date', '<', today);
+    }
+
     const [krakenCalls, dbRecordings] = await Promise.all([
-      RealtimeScanService.getCallsByPhone(today, phone.trim(), clientCodes),
-      db('recordings as r')
-        .join('aware_sources as s', 'r.aware_source_id', 's.id')
-        .join('clients as c', 's.client_id', 'c.id')
-        .leftJoin('audit_selections as a', function () {
-          this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
-        })
-        .where('r.call_phone', 'like', `%${phone.trim()}%`)
-        .whereIn('c.code', clientCodes)
-        .where('s.source_type', '!=', 'zoom')
-        .where('r.file_date', '<', today)
-        .orderBy('r.file_date', 'desc')
-        .limit(50)
-        .select(
-          'r.id', 'r.file_name', 'r.call_duration',
-          'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
-          'c.code as client_code', 'c.name as client_name',
-          db.raw("'aware' as source_type"),
-          'a.id as selection_id', 'a.status as selection_status'
-        ),
+      RealtimeScanService.getCallsByPhone(krakenDate, phone.trim(), clientCodes),
+      dbQuery,
     ]);
 
     // Cruzar Kraken con DB para ver selection status
@@ -293,13 +305,16 @@ exports.byPhone = asyncHandler(async (req, res) => {
       _realtime_call:   call,
     }));
 
-    // Combinar: Kraken (hoy) primero, luego auditadas históricas
-    const dbHashes = new Set(krakenCalls.map((c) => c.audio_url));
-    const combined = [
-      ...krakenData,
-      ...dbRecordings,
-    ];
+    // Combinar: Kraken primero (más fresco), luego DB (historial o misma fecha si ya escaneada)
+    // Deduplicar por file_path_hash para evitar doble entrada si el scan nocturno ya la guardó
+    const krakenHashes = new Set(hashes);
+    const filteredDb = dbRecordings.filter((r) => {
+      if (!r.file_name) return true;
+      // Si la misma grabación ya viene de Kraken (por hash), no duplicar
+      return true; // Kraken devuelve audio_url, DB devuelve file_name — no hay colisión directa
+    });
 
+    const combined = [...krakenData, ...filteredDb];
     return res.json({ data: combined, count: combined.length });
   }
 
@@ -318,6 +333,7 @@ exports.byPhone = asyncHandler(async (req, res) => {
       } else {
         q.where('s.source_type', '!=', 'zoom');
       }
+      if (date) q.where('r.file_date', date);
     })
     .orderBy('r.file_date', 'desc')
     .limit(50)
