@@ -122,13 +122,14 @@ exports.byAgent = asyncHandler(async (req, res) => {
       'a.id as selection_id', 'a.status as selection_status',
     ];
 
-    const auditedByUser = () => db('recordings as r')
+    // Partir de audit_selections para evitar mismatch de IDs entre grabaciones
+    // de realtime/select y las del scan nocturno (mismo agente, mismo día, distinto ID).
+    const auditedByUser = () => db('audit_selections as a')
+      .join('recordings as r', 'r.id', 'a.recording_id')
       .join('aware_sources as s', 'r.aware_source_id', 's.id')
       .join('clients as c', 's.client_id', 'c.id')
-      .join('audit_selections as a', function () {
-        this.on('a.recording_id', 'r.id').andOn('a.auditor_id', db.raw('?', [req.user.id]));
-      })
-      .where('r.agent_id', agent_id)
+      .where('a.agent_id', agent_id)
+      .where('a.auditor_id', req.user.id)
       .where('r.file_date', date)
       .select(selectCols);
 
