@@ -59,6 +59,8 @@ exports.getMetrics = asyncHandler(async (req, res) => {
     .where(db.raw('DATE(r.file_date)'), date)
     .whereIn('a.client_code', clientCodes)
     .whereNotNull('q.criteria')
+    .whereNotNull('a.score')
+    .where('a.status', 'completed')
     .modify((q) => {
       if (coordinatorAgentIds) q.whereIn('a.agent_id', coordinatorAgentIds);
     })
