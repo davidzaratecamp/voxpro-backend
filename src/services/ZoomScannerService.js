@@ -122,8 +122,13 @@ class ZoomScannerService {
       ? (rec.caller_number || null)
       : (rec.callee_number || null);
 
-    // Fecha local de la llamada (la API devuelve UTC en date_time, usamos la parte de fecha)
-    const fileDate = (rec.date_time || rec.start_time || null)?.slice(0, 10) ?? null;
+    // Fecha de la llamada en hora Bogotá (UTC-5, sin DST).
+    // La API de Zoom devuelve date_time en UTC — convertimos antes de extraer la fecha
+    // para que llamadas hechas después de las 7pm Bogotá no queden con fecha del día siguiente.
+    const utcStr = rec.date_time || rec.start_time || null;
+    const fileDate = utcStr
+      ? new Date(new Date(utcStr).getTime() - 5 * 60 * 60 * 1000).toISOString().slice(0, 10)
+      : null;
 
     const agentExt  = rec.owner?.extension_number ? String(rec.owner.extension_number) : null;
     const zoomName  = rec.owner?.name || null;
@@ -297,9 +302,10 @@ class ZoomScannerService {
   }
 
   _yesterday() {
-    const d = new Date();
-    d.setDate(d.getDate() - 1);
-    return d.toISOString().slice(0, 10);
+    // Calcula "ayer" en hora Bogotá (UTC-5, sin DST)
+    const bogotaNow = new Date(Date.now() - 5 * 60 * 60 * 1000);
+    bogotaNow.setUTCDate(bogotaNow.getUTCDate() - 1);
+    return bogotaNow.toISOString().slice(0, 10);
   }
 }
 
