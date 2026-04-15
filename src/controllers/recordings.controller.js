@@ -291,30 +291,28 @@ exports.byPhone = asyncHandler(async (req, res) => {
     const existingMap = {};
     for (const row of existing) existingMap[row.file_path_hash] = row;
 
-    const krakenData = krakenCalls.map((call, i) => ({
-      id:               null,
-      call_duration:    call.duration,
-      call_phone:       call.call_phone,
-      file_date:        call.file_date,
-      agent_id:         call.agent_id,
-      agent_name:       call.agent_name,
-      client_code:      call.clientCode,
-      source_type:      'aware',
-      selection_id:     existingMap[hashes[i]]?.selection_id || null,
-      selection_status: existingMap[hashes[i]]?.selection_status || null,
-      _realtime_call:   call,
-    }));
+    // Si la grabación ya está en DB, usar la versión de DB (tiene id real y estado de auditoría).
+    // Solo incluir en krakenData las llamadas que NO están en la DB todavía.
+    const krakenData = krakenCalls
+      .map((call, i) => {
+        if (existingMap[hashes[i]]) return null; // ya está en DB → la DB la incluye
+        return {
+          id:               null,
+          call_duration:    call.duration,
+          call_phone:       call.call_phone,
+          file_date:        call.file_date,
+          agent_id:         call.agent_id,
+          agent_name:       call.agent_name,
+          client_code:      call.clientCode,
+          source_type:      'aware',
+          selection_id:     null,
+          selection_status: null,
+          _realtime_call:   call,
+        };
+      })
+      .filter(Boolean);
 
-    // Combinar: Kraken primero (más fresco), luego DB (historial o misma fecha si ya escaneada)
-    // Deduplicar por file_path_hash para evitar doble entrada si el scan nocturno ya la guardó
-    const krakenHashes = new Set(hashes);
-    const filteredDb = dbRecordings.filter((r) => {
-      if (!r.file_name) return true;
-      // Si la misma grabación ya viene de Kraken (por hash), no duplicar
-      return true; // Kraken devuelve audio_url, DB devuelve file_name — no hay colisión directa
-    });
-
-    const combined = [...krakenData, ...filteredDb];
+    const combined = [...krakenData, ...dbRecordings];
     return res.json({ data: combined, count: combined.length });
   }
 
