@@ -141,8 +141,7 @@ class RealtimeScanService {
                AND rl.agente_id IS NOT NULL
                AND rl.time_speaking > 0
                AND rl.audiofile IS NOT NULL
-             ORDER BY rl.registro_llamada_id DESC
-             LIMIT 1000`,
+             ORDER BY rl.registro_llamada_id DESC`,
             [targetDate],
           );
           rows = result.rows.map((r) => ({
@@ -180,8 +179,7 @@ class RealtimeScanService {
                AND rl.agente_id IS NOT NULL
                AND rl.call_time > 0
                AND rl.call_id > 0
-             ORDER BY rl.registro_llamada_id DESC
-             LIMIT 1000`,
+             ORDER BY rl.registro_llamada_id DESC`,
             [targetDate],
           );
           rows = result.rows.map((r) => {
