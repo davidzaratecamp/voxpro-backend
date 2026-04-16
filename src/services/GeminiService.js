@@ -67,7 +67,13 @@ async function resolveCampaignKey(clientCode, agentId, proyectoId) {
   if (clientCode === 'lv') {
     return proyectoId === LV_CUSTOMER_PROYECTO ? 'lv_customer' : 'lv_ventas';
   }
-  return clientCode; // claro_wcb, claro_hogar, claro_tyt
+  if (clientCode === 'claro_wcb' && proyectoId != null) {
+    const WCB_MOVIL_IDS = new Set([24, 25, 26, 28, 40, 43]);
+    const WCB_PYMES_IDS = new Set([36, 37, 38, 39, 42, 45]);
+    if (WCB_MOVIL_IDS.has(proyectoId)) return 'claro_movil';
+    if (WCB_PYMES_IDS.has(proyectoId)) return 'claro_pymes';
+  }
+  return clientCode; // claro_wcb, claro_hogar, claro_tyt, claro_movil, claro_pymes
 }
 
 class GeminiService {

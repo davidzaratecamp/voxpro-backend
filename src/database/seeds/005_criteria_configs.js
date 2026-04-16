@@ -14,6 +14,18 @@ const NA_RULES = {
     rejection:    ['cierre_comercial'],
     always_na:    ['uso_herramientas', 'tipificacion'],
   },
+  claro_movil: {
+    third_party:  ['interes_necesidades', 'oferta_comercial', 'manejo_objeciones', 'cierre_comercial', 'resalta_beneficios'],
+    dropped_call: ['cierre_comercial', 'manejo_objeciones', 'despedida', 'tipificacion'],
+    rejection:    ['cierre_comercial'],
+    always_na:    ['uso_herramientas', 'tipificacion'],
+  },
+  claro_pymes: {
+    third_party:  ['interes_necesidades', 'oferta_comercial', 'manejo_objeciones', 'cierre_comercial', 'resalta_beneficios'],
+    dropped_call: ['cierre_comercial', 'manejo_objeciones', 'despedida', 'tipificacion'],
+    rejection:    ['cierre_comercial'],
+    always_na:    ['uso_herramientas', 'tipificacion'],
+  },
   claro_hogar: {
     third_party:  ['interes_necesidades', 'habilidades_comerciales', 'resalta_beneficios', 'cierre_comercial', 'manejo_objeciones'],
     dropped_call: ['cierre_comercial', 'habilidades_comerciales', 'manejo_objeciones', 'despedida', 'tipificacion'],
@@ -54,6 +66,8 @@ const NA_RULES = {
 
 const CLIENT_GROUPS = {
   claro_wcb:      'claro',
+  claro_movil:    'claro',
+  claro_pymes:    'claro',
   claro_hogar:    'claro',
   claro_tyt:      'claro',
   obama_ventas:   'obama',

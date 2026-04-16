@@ -312,7 +312,19 @@ exports.byPhone = asyncHandler(async (req, res) => {
       })
       .filter(Boolean);
 
-    const combined = [...krakenData, ...dbRecordings];
+    // Combinar y deduplicar: misma llamada puede aparecer como entrada de Kraken Y de DB
+    // (el scanner nocturno crea un registro nuevo del mismo archivo).
+    // Clave: agent_id + file_date + call_duration. Preferir el que tiene selection_id (auditado)
+    // o en su defecto el que tiene id real (DB) sobre el de Kraken (id null).
+    const dedupMap = new Map();
+    for (const rec of [...krakenData, ...dbRecordings]) {
+      const key = `${rec.agent_id}|${rec.file_date}|${rec.call_duration}`;
+      const prev = dedupMap.get(key);
+      if (!prev || (!prev.selection_id && rec.selection_id) || (!prev.id && rec.id)) {
+        dedupMap.set(key, rec);
+      }
+    }
+    const combined = [...dedupMap.values()];
     return res.json({ data: combined, count: combined.length });
   }
 

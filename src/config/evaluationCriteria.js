@@ -41,6 +41,72 @@ const CRITERIA = {
     ],
   },
 
+  // ─── Claro Móvil ─────────────────────────────────────────────
+  claro_movil: {
+    label: 'Claro Móvil',
+    general: [
+      { key: 'cierre_comercial',          label: 'Cierre Comercial',                              weight: 12 },
+      { key: 'interes_necesidades',       label: 'Interés por conocer las necesidades del cliente', weight: 10 },
+      { key: 'oferta_comercial',          label: 'Oferta comercial',                               weight: 10 },
+      { key: 'manejo_objeciones',         label: 'Manejo de objeciones',                           weight: 10 },
+      { key: 'resalta_beneficios',        label: 'Resalta beneficios de Todo Claro',               weight: 9 },
+      { key: 'escucha_activa',            label: 'Escucha Activa',                                 weight: 8 },
+      { key: 'argumenta_conocimientos',   label: 'Argumenta con sus conocimientos',                weight: 8 },
+      { key: 'amabilidad_empatia',        label: 'Amabilidad y Empatía',                           weight: 7 },
+      { key: 'uso_herramientas',          label: 'Uso de Herramientas',                            weight: 7 },
+      { key: 'tiempos_espera',            label: 'Tiempos de espera',                              weight: 5 },
+      { key: 'comunicacion_efectiva',     label: 'Comunicación efectiva',                          weight: 5 },
+      { key: 'saludo',                    label: 'Saludo',                                         weight: 3 },
+      { key: 'despedida',                 label: 'Despedida',                                      weight: 3 },
+      { key: 'tipificacion',             label: 'Tipificación',                                   weight: 3 },
+    ],
+    highImpact: [
+      { key: 'maltrato_cliente',          label: 'Maltrato al Cliente' },
+      { key: 'cuelgue_llamada',           label: 'Cuelgue de llamada' },
+      { key: 'info_politicas',            label: 'Información correcta de políticas vigentes' },
+      { key: 'info_herramientas',         label: 'Información correcta de herramientas' },
+      { key: 'induce_cancelar',           label: 'Induce al cliente a cancelar el servicio' },
+      { key: 'registro',                  label: 'Registro' },
+      { key: 'fraude_comercial',          label: 'Fraude comercial' },
+      { key: 'lectura_contrato',          label: 'Realiza lectura al 100% del contrato' },
+      { key: 'gestion_comercial',         label: 'Gestión Comercial' },
+      { key: 'consulta_sox',              label: 'Consulta SOX' },
+    ],
+  },
+
+  // ─── Claro PYMES ─────────────────────────────────────────────
+  claro_pymes: {
+    label: 'Claro PYMES',
+    general: [
+      { key: 'cierre_comercial',          label: 'Cierre Comercial',                              weight: 12 },
+      { key: 'interes_necesidades',       label: 'Interés por conocer las necesidades del cliente', weight: 10 },
+      { key: 'oferta_comercial',          label: 'Oferta comercial',                               weight: 10 },
+      { key: 'manejo_objeciones',         label: 'Manejo de objeciones',                           weight: 10 },
+      { key: 'resalta_beneficios',        label: 'Resalta beneficios de Todo Claro',               weight: 9 },
+      { key: 'escucha_activa',            label: 'Escucha Activa',                                 weight: 8 },
+      { key: 'argumenta_conocimientos',   label: 'Argumenta con sus conocimientos',                weight: 8 },
+      { key: 'amabilidad_empatia',        label: 'Amabilidad y Empatía',                           weight: 7 },
+      { key: 'uso_herramientas',          label: 'Uso de Herramientas',                            weight: 7 },
+      { key: 'tiempos_espera',            label: 'Tiempos de espera',                              weight: 5 },
+      { key: 'comunicacion_efectiva',     label: 'Comunicación efectiva',                          weight: 5 },
+      { key: 'saludo',                    label: 'Saludo',                                         weight: 3 },
+      { key: 'despedida',                 label: 'Despedida',                                      weight: 3 },
+      { key: 'tipificacion',             label: 'Tipificación',                                   weight: 3 },
+    ],
+    highImpact: [
+      { key: 'maltrato_cliente',          label: 'Maltrato al Cliente' },
+      { key: 'cuelgue_llamada',           label: 'Cuelgue de llamada' },
+      { key: 'info_politicas',            label: 'Información correcta de políticas vigentes' },
+      { key: 'info_herramientas',         label: 'Información correcta de herramientas' },
+      { key: 'induce_cancelar',           label: 'Induce al cliente a cancelar el servicio' },
+      { key: 'registro',                  label: 'Registro' },
+      { key: 'fraude_comercial',          label: 'Fraude comercial' },
+      { key: 'lectura_contrato',          label: 'Realiza lectura al 100% del contrato' },
+      { key: 'gestion_comercial',         label: 'Gestión Comercial' },
+      { key: 'consulta_sox',              label: 'Consulta SOX' },
+    ],
+  },
+
   // ─── Claro Hogar ─────────────────────────────────────────────
   claro_hogar: {
     label: 'Claro Hogar',
