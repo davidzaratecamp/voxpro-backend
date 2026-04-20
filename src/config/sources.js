@@ -19,6 +19,7 @@ const AWARE_SOURCES = [
     db: { host: '10.255.255.30', database: 'aware', user: group1User, password: group1Pass, port: 5432 },
     schema: 'standard',
     audioBaseUrl: 'https://10.255.255.30/audiofiles',
+    proyectoIds: [34, 35],
   },
 
   // Obama - 3 carpetas, 3 servidores distintos

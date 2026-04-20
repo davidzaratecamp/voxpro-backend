@@ -126,6 +126,10 @@ class RealtimeScanService {
 
         let rows;
         if (src.schema === 'awareccm') {
+          const proyectoFilter = src.proyectoIds?.length
+            ? `AND rl.proyecto_id = ANY($2)`
+            : '';
+          const params = src.proyectoIds?.length ? [targetDate, src.proyectoIds] : [targetDate];
           const result = await pgClient.query(
             `SELECT
                rl.registro_llamada_id,
@@ -141,8 +145,9 @@ class RealtimeScanService {
                AND rl.agente_id IS NOT NULL
                AND rl.time_speaking > 0
                AND rl.audiofile IS NOT NULL
+               ${proyectoFilter}
              ORDER BY rl.registro_llamada_id DESC`,
-            [targetDate],
+            params,
           );
           rows = result.rows.map((r) => ({
             sourceKey:           `${src.db.host}:${src.db.database}`,
@@ -162,6 +167,10 @@ class RealtimeScanService {
             file_name:           `${r.audiofile}.WAV`.split('/').pop(),
           }));
         } else {
+          const proyectoFilter = src.proyectoIds?.length
+            ? `AND rl.proyecto_id = ANY($2)`
+            : '';
+          const params = src.proyectoIds?.length ? [targetDate, src.proyectoIds] : [targetDate];
           const result = await pgClient.query(
             `SELECT
                rl.registro_llamada_id,
@@ -179,8 +188,9 @@ class RealtimeScanService {
                AND rl.agente_id IS NOT NULL
                AND rl.call_time > 0
                AND rl.call_id > 0
+               ${proyectoFilter}
              ORDER BY rl.registro_llamada_id DESC`,
-            [targetDate],
+            params,
           );
           rows = result.rows.map((r) => {
             const audioUrl = buildStandardAudioUrl(
