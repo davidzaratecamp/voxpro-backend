@@ -40,6 +40,18 @@ class ZoomScannerService {
       return { found: 0, inserted: 0, skipped: 0, errors: 0 };
     }
 
+    // Obtener fuente ZOOM_PHONE_LV (puede no existir aún)
+    const lvSource = await db('aware_sources as s')
+      .join('clients as c', 's.client_id', 'c.id')
+      .where('s.folder_name', 'ZOOM_PHONE_LV')
+      .where('s.source_type', 'zoom')
+      .where('s.active', true)
+      .select('s.id', 's.client_id', 'c.code as client_code')
+      .first() || null;
+
+    // Cédulas de agentes LV para enrutar correctamente sus grabaciones
+    const lvCedulaSet = await this._buildLvCedulaSet();
+
     logger.info(`Zoom: escaneando ${date}`);
 
     let recordings;
@@ -56,7 +68,7 @@ class ZoomScannerService {
 
     for (const rec of recordings) {
       try {
-        const result = await this._insertRecording(rec, source);
+        const result = await this._insertRecording(rec, source, lvSource, lvCedulaSet);
         if (result === 'inserted') summary.inserted++;
         else summary.skipped++;
       } catch (err) {
@@ -67,7 +79,7 @@ class ZoomScannerService {
 
     // Al final de cada scan, reintentar agentes que aún no tienen cédula.
     // Cuando aparezcan en Aware, se resuelven solos en el siguiente ciclo.
-    const resolved = await this.resolveUnmatchedAgents();
+    const resolved = await this.resolveUnmatchedAgents(lvSource, lvCedulaSet);
     if (resolved.resolved > 0) {
       logger.info(`Zoom: resueltos ${resolved.resolved}/${resolved.checked} agentes pendientes`);
     }
@@ -109,7 +121,20 @@ class ZoomScannerService {
    *   3. Fallback: extensión como agent_id + guarda en agents con cedula=NULL
    *      para que resolveUnmatchedAgents() lo reintente en el futuro.
    */
-  async _insertRecording(rec, source) {
+  /**
+   * Construye un Set con las cédulas de todos los agentes LV conocidos.
+   * Se usa para enrutar grabaciones Zoom al cliente correcto (LV vs Obama).
+   */
+  async _buildLvCedulaSet() {
+    const lvAgents = await db('recordings')
+      .whereIn('proyecto_id', [34, 35])
+      .whereNotNull('agent_id')
+      .distinct('agent_id')
+      .select('agent_id');
+    return new Set(lvAgents.map((a) => String(a.agent_id)));
+  }
+
+  async _insertRecording(rec, source, lvSource, lvCedulaSet) {
     if (!rec.download_url) return 'skipped';
 
     const pathHash = crypto.createHash('sha256').update(rec.download_url).digest('hex');
@@ -168,8 +193,13 @@ class ZoomScannerService {
       }
     }
 
+    // Si el agente es LV y existe la fuente LV, enrutar correctamente
+    const targetSource = (agentId && lvSource && lvCedulaSet && lvCedulaSet.has(String(agentId)))
+      ? lvSource
+      : source;
+
     await db('recordings').insert({
-      aware_source_id:  source.id,
+      aware_source_id:  targetSource.id,
       file_name:        `${rec.id}.mp4`,
       file_path:        rec.download_url,
       file_path_hash:   pathHash,
@@ -195,7 +225,7 @@ class ZoomScannerService {
    * (aunque sea días después), en el siguiente scan queda resuelto y sus
    * grabaciones existentes se actualizan en masa.
    */
-  async resolveUnmatchedAgents() {
+  async resolveUnmatchedAgents(lvSource = null, lvCedulaSet = null) {
     const unmatched = await db('agents')
       .whereNull('cedula')
       .whereNotNull('zoom_extension')
@@ -208,11 +238,18 @@ class ZoomScannerService {
       const matched = await this._autoMatchAgent(agent.zoom_extension, agent.name, agent.client_id);
       if (!matched) continue;
 
-      // Actualizar en masa todas las grabaciones Zoom de esta extensión
+      // Actualizar cédula y nombre en todas las grabaciones de esta extensión
+      const updateData = { agent_id: matched.cedula, agent_name: matched.name };
+
+      // Si el agente resuelto es LV, corregir también el source
+      if (lvSource && lvCedulaSet && lvCedulaSet.has(String(matched.cedula))) {
+        updateData.aware_source_id = lvSource.id;
+      }
+
       await db('recordings')
         .where('agent_extension', agent.zoom_extension)
         .where('agent_id', agent.zoom_extension) // solo las que quedaron sin cédula
-        .update({ agent_id: matched.cedula, agent_name: matched.name });
+        .update(updateData);
 
       resolved++;
     }
