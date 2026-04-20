@@ -30,10 +30,12 @@ exports.getMetrics = asyncHandler(async (req, res) => {
     req.user.zoom_enabled
       ? db('recordings as r')
           .join('aware_sources as s', 'r.aware_source_id', 's.id')
+          .join('clients as c', 's.client_id', 'c.id')
           .where('s.source_type', 'zoom')
           .where('r.file_date', date)
           .whereNotNull('r.agent_id')
           .where('r.agent_id', '!=', '-1')
+          .whereIn('c.code', clientCodes)
           .modify((q) => {
             if (coordinatorAgentIds) q.whereIn('r.agent_id', coordinatorAgentIds);
           })

@@ -76,6 +76,10 @@ async function resolveCampaignKey(clientCode, agentId, proyectoId) {
   return clientCode; // claro_wcb, claro_hogar, claro_tyt, claro_movil, claro_pymes
 }
 
+// Modelos de respaldo en orden de preferencia.
+// Si el primario falla con 503/429, se intenta el siguiente.
+const FALLBACK_MODELS = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview'];
+
 class GeminiService {
   constructor() {
     this.genAI = new GoogleGenerativeAI(config.gemini.apiKey);
@@ -122,15 +126,7 @@ class GeminiService {
       const fileUri = uploadResponse.file.uri;
       logger.info(`Audio subido: ${uploadedFileName}`);
 
-      return await this._retryWithBackoff(async () => {
-        const result = await this.model.generateContent([
-          { fileData: { mimeType, fileUri } },
-          { text: prompt },
-        ]);
-        const response = result.response.text();
-        logger.debug('Respuesta Gemini recibida', { length: response.length });
-        return this._parseResponse(response, criteria);
-      });
+      return await this._retryWithFallback(fileUri, mimeType, prompt, criteria);
     } finally {
       try { fs.unlinkSync(tmpPath); } catch {}
       if (uploadedFileName) {
@@ -140,15 +136,50 @@ class GeminiService {
   }
 
   /**
+   * Intenta generateContent con el modelo primario; si falla con 503/429 de forma
+   * persistente, reintenta con los modelos de respaldo en FALLBACK_MODELS.
+   */
+  async _retryWithFallback(fileUri, mimeType, prompt, criteria) {
+    const modelsToTry = [config.gemini.model, ...FALLBACK_MODELS];
+
+    for (let i = 0; i < modelsToTry.length; i++) {
+      const modelName = modelsToTry[i];
+      const model = i === 0 ? this.model : this.genAI.getGenerativeModel({ model: modelName });
+
+      try {
+        return await this._retryWithBackoff(async () => {
+          const result = await model.generateContent([
+            { fileData: { mimeType, fileUri } },
+            { text: prompt },
+          ]);
+          const response = result.response.text();
+          logger.debug('Respuesta Gemini recibida', { length: response.length });
+          return this._parseResponse(response, criteria);
+        });
+      } catch (err) {
+        const is503 = err.status === 503 || err.message?.includes('503') || err.message?.includes('high demand');
+        const is429 = err.status === 429 || err.message?.includes('429') || err.message?.includes('Resource exhausted');
+        const hasMoreFallbacks = i < modelsToTry.length - 1;
+
+        if ((is503 || is429) && hasMoreFallbacks) {
+          logger.warn(`Gemini: modelo ${modelName} no disponible (${is503 ? '503' : '429'}), intentando con ${modelsToTry[i + 1]}`);
+          continue;
+        }
+        throw err;
+      }
+    }
+  }
+
+  /**
    * Retry con backoff exponencial para errores transitorios.
    * Para 429 (rate limit) usa delays largos: 30s, 60s, 120s.
    * Para otros errores transitorios usa delays cortos: 2s, 4s, 8s.
    */
-  async _retryWithBackoff(fn, maxRetries = 5) {
+  async _retryWithBackoff(fn, maxRetries = 3) {
     const RETRIABLE_CODES = [429, 500, 503];
     const RETRIABLE_ERRORS = ['ECONNRESET', 'ETIMEDOUT', 'ENOTFOUND'];
-    // Delays fijos para rate limit: 15s, 30s, 45s, 60s, 90s
-    const RATE_LIMIT_DELAYS = [15000, 30000, 45000, 60000, 90000];
+    // Delays fijos para rate limit: 5s, 10s, 20s
+    const RATE_LIMIT_DELAYS = [5000, 10000, 20000];
 
     for (let attempt = 0; attempt <= maxRetries; attempt++) {
       try {

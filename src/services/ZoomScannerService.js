@@ -126,12 +126,26 @@ class ZoomScannerService {
    * Se usa para enrutar grabaciones Zoom al cliente correcto (LV vs Obama).
    */
   async _buildLvCedulaSet() {
-    const lvAgents = await db('recordings')
+    // Fuente 1: agentes con grabaciones Aware en proyectos LV (34=LV-Ventas, 35=LV-Customer)
+    const lvFromRecordings = await db('recordings')
       .whereIn('proyecto_id', [34, 35])
       .whereNotNull('agent_id')
       .distinct('agent_id')
       .select('agent_id');
-    return new Set(lvAgents.map((a) => String(a.agent_id)));
+
+    // Fuente 2: agentes registrados directamente con client_id=LV en tabla agents
+    // (cubre agentes que solo tienen Zoom, sin grabaciones Aware en proyectos LV)
+    const lvClient = await db('clients').where('code', 'lv').select('id').first();
+    const lvFromAgents = lvClient
+      ? await db('agents')
+          .where('client_id', lvClient.id)
+          .whereNotNull('cedula')
+          .distinct('cedula')
+          .select('cedula as agent_id')
+      : [];
+
+    const all = [...lvFromRecordings, ...lvFromAgents];
+    return new Set(all.map((a) => String(a.agent_id)));
   }
 
   async _insertRecording(rec, source, lvSource, lvCedulaSet) {
