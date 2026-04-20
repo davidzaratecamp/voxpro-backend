@@ -91,6 +91,42 @@ exports.byAgent = asyncHandler(async (req, res) => {
       'a.id as selection_id', 'a.status as selection_status'
     );
 
+  const isLv = clientCodes.includes('lv');
+
+  // LV con zoom_enabled: split mode con filtro normal por clientCodes
+  if (isLv && req.user.zoom_enabled) {
+    const selectCols = [
+      'r.id', 'r.file_name', 'r.call_duration',
+      'r.file_date', 'r.call_phone', 'r.agent_name', 'r.agent_id',
+      'c.code as client_code', 's.source_type',
+      'a.id as selection_id', 'a.status as selection_status',
+    ];
+
+    const auditedByUser = () => db('audit_selections as a')
+      .join('recordings as r', 'r.id', 'a.recording_id')
+      .join('aware_sources as s', 'r.aware_source_id', 's.id')
+      .join('clients as c', 's.client_id', 'c.id')
+      .where('a.agent_id', agent_id)
+      .where('a.auditor_id', req.user.id)
+      .where('r.file_date', date)
+      .select(selectCols);
+
+    const [aware, zoom, auditedRows] = await Promise.all([
+      baseQuery().where('s.source_type', '!=', 'zoom').limit(10),
+      baseQuery().where('s.source_type', 'zoom').limit(10),
+      auditedByUser(),
+    ]);
+
+    const awareIds = new Set(aware.map((r) => r.id));
+    const zoomIds  = new Set(zoom.map((r) => r.id));
+    for (const row of auditedRows) {
+      if (row.source_type === 'zoom' && !zoomIds.has(row.id)) zoom.push(row);
+      if (row.source_type !== 'zoom' && !awareIds.has(row.id)) aware.push(row);
+    }
+
+    return res.json({ data: aware, zoom_data: zoom });
+  }
+
   // Obama con zoom_enabled: devolver 10 Aware + 10 Zoom por separado.
   // Las grabaciones Aware de agentes Obama pueden estar bajo cualquier cliente
   // (obama, claro_hogar, lv…), por eso no aplicamos el filtro de clientCodes
