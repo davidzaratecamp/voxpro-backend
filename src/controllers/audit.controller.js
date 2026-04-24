@@ -6,7 +6,7 @@ const path = require('path');
 const AuditService = require('../services/AuditService');
 const AnalysisService = require('../services/AnalysisService');
 const SFTPService = require('../services/SFTPService');
-const { downloadBuffer } = require('../services/RealtimeScanService');
+const { downloadBuffer, downloadBufferViaTunnel } = require('../services/RealtimeScanService');
 const ZoomAuth = require('../services/ZoomAuthService');
 const db = require('../database/connection');
 const asyncHandler = require('../middleware/asyncHandler');
@@ -257,19 +257,22 @@ exports.streamAudio = asyncHandler(async (req, res) => {
       try {
         audioBuffer = await downloadBuffer(selection.file_path);
       } catch (httpErr) {
-        // Fallback SFTP para grabaciones realtime cuyo archivo HTTP no está disponible aún
-        const sftpPath = AnalysisService.httpUrlToSftpPath(selection.file_path);
-        if (sftpPath) {
-          try {
-            await sftp.connect();
-            audioBuffer = await sftp.getFile(sftpPath);
-            await sftp.disconnect();
-          } catch {
-            await sftp.disconnect().catch(() => {});
+        try {
+          audioBuffer = await downloadBufferViaTunnel(selection.file_path);
+        } catch (tunnelErr) {
+          const sftpPath = AnalysisService.httpUrlToSftpPath(selection.file_path);
+          if (sftpPath) {
+            try {
+              await sftp.connect();
+              audioBuffer = await sftp.getFile(sftpPath);
+              await sftp.disconnect();
+            } catch {
+              await sftp.disconnect().catch(() => {});
+            }
           }
         }
         if (!audioBuffer) {
-          const e = new Error('El audio aún no está disponible. Las grabaciones del día se sincronizan ~5:00 AM.');
+          const e = new Error('No se pudo descargar el audio de esta grabación.');
           e.statusCode = 503;
           throw e;
         }

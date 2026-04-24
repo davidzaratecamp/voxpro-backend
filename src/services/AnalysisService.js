@@ -6,7 +6,7 @@ const path = require('path');
 const db = require('../database/connection');
 const SFTPService = require('./SFTPService');
 const GeminiService = require('./GeminiService');
-const { downloadBuffer } = require('./RealtimeScanService');
+const { downloadBuffer, downloadBufferViaTunnel } = require('./RealtimeScanService');
 const ZoomAuth = require('./ZoomAuthService');
 const logger = require('../utils/logger');
 const config = require('../config');
@@ -67,38 +67,40 @@ class AnalysisService {
       rawBuffer = await ZoomAuth.download(selection.file_path);
       logger.info(`Audio Zoom descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
     } else if (selection.file_path.startsWith('https://') || selection.file_path.startsWith('http://')) {
-      // Grabación realtime de Aware: intentar HTTP primero, luego SFTP como fallback.
-      // Si ambos fallan, el archivo aún no está disponible (se sincroniza en el scan nocturno ~5am).
+      // Grabación realtime de Aware: intentar HTTP directo → túnel SSH → SFTP (Kraken).
       let audioOk = false;
       try {
         rawBuffer = await downloadBuffer(selection.file_path);
         logger.info(`Audio HTTP descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
         audioOk = true;
       } catch (httpErr) {
-        const sftpPath = httpUrlToSftpPath(selection.file_path);
-        if (sftpPath) {
-          logger.warn(`HTTP falló (${httpErr.message}), intentando SFTP: ${sftpPath}`);
-          const sftp = new SFTPService();
-          try {
-            await sftp.connect();
-            rawBuffer = await sftp.getFile(sftpPath);
-            logger.info(`Audio SFTP (fallback) descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
-            audioOk = true;
-          } catch (sftpErr) {
-            logger.warn(`SFTP también falló: ${sftpErr.message}`);
-          } finally {
-            await sftp.disconnect();
+        logger.warn(`HTTP directo falló (${httpErr.message}), intentando túnel SSH`);
+        try {
+          rawBuffer = await downloadBufferViaTunnel(selection.file_path);
+          logger.info(`Audio HTTP (túnel SSH) descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+          audioOk = true;
+        } catch (tunnelErr) {
+          logger.warn(`Túnel SSH falló (${tunnelErr.message}), intentando SFTP`);
+          const sftpPath = httpUrlToSftpPath(selection.file_path);
+          if (sftpPath) {
+            const sftp = new SFTPService();
+            try {
+              await sftp.connect();
+              rawBuffer = await sftp.getFile(sftpPath);
+              logger.info(`Audio SFTP (fallback) descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+              audioOk = true;
+            } catch (sftpErr) {
+              logger.warn(`SFTP también falló: ${sftpErr.message}`);
+            } finally {
+              await sftp.disconnect();
+            }
           }
         }
-        if (!audioOk) {
-          const userErr = new Error(
-            'El audio de esta grabación aún no está disponible en el servidor de almacenamiento. ' +
-            'Las grabaciones del día actual se sincronizan durante el escaneo nocturno (~5:00 AM). ' +
-            'Por favor, intente nuevamente mañana.'
-          );
-          userErr.statusCode = 503;
-          throw userErr;
-        }
+      }
+      if (!audioOk) {
+        const userErr = new Error('No se pudo descargar el audio de esta grabación.');
+        userErr.statusCode = 503;
+        throw userErr;
       }
     } else {
       const sftp = new SFTPService();

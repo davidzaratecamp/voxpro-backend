@@ -29,6 +29,73 @@ function downloadBuffer(url) {
 }
 
 /**
+ * Descarga audio de una URL Aware tunelizando a través de Kraken (SSH jump host).
+ * Usado cuando el servidor backend no puede alcanzar los servidores Aware directamente.
+ */
+function downloadBufferViaTunnel(audioUrl) {
+  return new Promise((resolve, reject) => {
+    const parsedUrl = new URL(audioUrl);
+    const targetHost = parsedUrl.hostname;
+    const targetPort = parsedUrl.port ? parseInt(parsedUrl.port, 10) : 443;
+    const filePath = parsedUrl.pathname + (parsedUrl.search || '');
+
+    const sshCfg = {
+      host: config.aware.ssh.host,
+      port: config.aware.ssh.port,
+      username: config.aware.ssh.username,
+    };
+    if (config.aware.ssh.privateKey) {
+      sshCfg.privateKey = fs.readFileSync(config.aware.ssh.privateKey);
+    } else if (config.aware.ssh.password) {
+      sshCfg.password = config.aware.ssh.password;
+    }
+
+    const sshClient = new SSHClient();
+    let server;
+
+    const cleanup = () => {
+      try { server.close(); } catch {}
+      try { sshClient.end(); } catch {}
+    };
+
+    sshClient.on('ready', () => {
+      server = net.createServer((sock) => {
+        sshClient.forwardOut('127.0.0.1', 0, targetHost, targetPort, (err, stream) => {
+          if (err) { sock.destroy(); return; }
+          sock.pipe(stream);
+          stream.pipe(sock);
+        });
+      });
+
+      server.listen(0, '127.0.0.1', () => {
+        const localPort = server.address().port;
+        const agent = new https.Agent({ rejectUnauthorized: false });
+
+        https.get(
+          { hostname: '127.0.0.1', port: localPort, path: filePath, agent, headers: { Host: targetHost } },
+          (res) => {
+            if (res.statusCode !== 200) {
+              res.resume();
+              cleanup();
+              return reject(new Error(`HTTP ${res.statusCode} via túnel para ${audioUrl}`));
+            }
+            const chunks = [];
+            res.on('data', (c) => chunks.push(c));
+            res.on('end', () => { cleanup(); resolve(Buffer.concat(chunks)); });
+            res.on('error', (e) => { cleanup(); reject(e); });
+          },
+        ).on('error', (e) => { cleanup(); reject(e); });
+      });
+
+      server.on('error', (e) => { sshClient.end(); reject(e); });
+    });
+
+    sshClient.on('error', reject);
+    sshClient.connect(sshCfg);
+  });
+}
+
+/**
  * Abre túnel SSH hacia un host Aware (igual que AwareDBService).
  */
 function openTunnel(targetHost, targetPort = 5432) {
@@ -467,4 +534,5 @@ class RealtimeScanService {
 
 module.exports = new RealtimeScanService();
 module.exports.downloadBuffer = downloadBuffer;
+module.exports.downloadBufferViaTunnel = downloadBufferViaTunnel;
 module.exports.httpsAgent = httpsAgent;
