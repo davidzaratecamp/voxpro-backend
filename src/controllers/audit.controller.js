@@ -254,28 +254,39 @@ exports.streamAudio = asyncHandler(async (req, res) => {
       fs.writeFileSync(tmpInput, audioBuffer);
     } else if (selection.file_path.startsWith('https://') || selection.file_path.startsWith('http://')) {
       let audioBuffer;
-      try {
-        audioBuffer = await downloadBuffer(selection.file_path);
-      } catch (httpErr) {
-        try {
-          audioBuffer = await downloadBufferViaTunnel(selection.file_path);
-        } catch (tunnelErr) {
-          const sftpPath = AnalysisService.httpUrlToSftpPath(selection.file_path);
-          if (sftpPath) {
-            try {
-              await sftp.connect();
-              audioBuffer = await sftp.getFile(sftpPath);
-              await sftp.disconnect();
-            } catch {
-              await sftp.disconnect().catch(() => {});
-            }
+
+      const altUrl = selection.file_path.includes('/Q-')
+        ? selection.file_path.replace('/Q-', '/')
+        : null;
+      const httpUrls = altUrl ? [selection.file_path, altUrl] : [selection.file_path];
+
+      for (const url of httpUrls) {
+        try { audioBuffer = await downloadBuffer(url); break; } catch {}
+      }
+
+      if (!audioBuffer) {
+        for (const url of httpUrls) {
+          try { audioBuffer = await downloadBufferViaTunnel(url); break; } catch {}
+        }
+      }
+
+      if (!audioBuffer) {
+        const sftpPath = AnalysisService.httpUrlToSftpPath(selection.file_path);
+        if (sftpPath) {
+          try {
+            await sftp.connect();
+            audioBuffer = await sftp.getFile(sftpPath);
+            await sftp.disconnect();
+          } catch {
+            await sftp.disconnect().catch(() => {});
           }
         }
-        if (!audioBuffer) {
-          const e = new Error('No se pudo descargar el audio de esta grabación.');
-          e.statusCode = 503;
-          throw e;
-        }
+      }
+
+      if (!audioBuffer) {
+        const e = new Error('No se pudo descargar el audio de esta grabación.');
+        e.statusCode = 503;
+        throw e;
       }
       fs.writeFileSync(tmpInput, audioBuffer);
     } else {

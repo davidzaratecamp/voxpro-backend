@@ -67,36 +67,58 @@ class AnalysisService {
       rawBuffer = await ZoomAuth.download(selection.file_path);
       logger.info(`Audio Zoom descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
     } else if (selection.file_path.startsWith('https://') || selection.file_path.startsWith('http://')) {
-      // Grabación realtime de Aware: intentar HTTP directo → túnel SSH → SFTP (Kraken).
+      // Grabación realtime de Aware.
+      // Orden de intentos: HTTP con Q- → HTTP sin Q- (llamadas directas) → túnel SSH → SFTP Kraken
       let audioOk = false;
-      try {
-        rawBuffer = await downloadBuffer(selection.file_path);
-        logger.info(`Audio HTTP descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
-        audioOk = true;
-      } catch (httpErr) {
-        logger.warn(`HTTP directo falló (${httpErr.message}), intentando túnel SSH`);
+
+      // URL alternativa sin prefijo Q- para llamadas directas (no de cola)
+      const altUrl = selection.file_path.includes('/Q-')
+        ? selection.file_path.replace('/Q-', '/')
+        : null;
+
+      const httpUrls = altUrl
+        ? [selection.file_path, altUrl]
+        : [selection.file_path];
+
+      for (const url of httpUrls) {
         try {
-          rawBuffer = await downloadBufferViaTunnel(selection.file_path);
-          logger.info(`Audio HTTP (túnel SSH) descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+          rawBuffer = await downloadBuffer(url);
+          logger.info(`Audio HTTP descargado (${url.includes('/Q-') ? 'con Q-' : 'sin Q-'}): ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
           audioOk = true;
-        } catch (tunnelErr) {
-          logger.warn(`Túnel SSH falló (${tunnelErr.message}), intentando SFTP`);
-          const sftpPath = httpUrlToSftpPath(selection.file_path);
-          if (sftpPath) {
-            const sftp = new SFTPService();
-            try {
-              await sftp.connect();
-              rawBuffer = await sftp.getFile(sftpPath);
-              logger.info(`Audio SFTP (fallback) descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
-              audioOk = true;
-            } catch (sftpErr) {
-              logger.warn(`SFTP también falló: ${sftpErr.message}`);
-            } finally {
-              await sftp.disconnect();
-            }
+          break;
+        } catch {}
+      }
+
+      if (!audioOk) {
+        logger.warn(`HTTP directo falló, intentando túnel SSH`);
+        for (const url of httpUrls) {
+          try {
+            rawBuffer = await downloadBufferViaTunnel(url);
+            logger.info(`Audio HTTP (túnel SSH) descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+            audioOk = true;
+            break;
+          } catch {}
+        }
+      }
+
+      if (!audioOk) {
+        logger.warn(`Túnel SSH falló, intentando SFTP`);
+        const sftpPath = httpUrlToSftpPath(selection.file_path);
+        if (sftpPath) {
+          const sftp = new SFTPService();
+          try {
+            await sftp.connect();
+            rawBuffer = await sftp.getFile(sftpPath);
+            logger.info(`Audio SFTP (fallback) descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+            audioOk = true;
+          } catch (sftpErr) {
+            logger.warn(`SFTP también falló: ${sftpErr.message}`);
+          } finally {
+            await sftp.disconnect();
           }
         }
       }
+
       if (!audioOk) {
         const userErr = new Error('No se pudo descargar el audio de esta grabación.');
         userErr.statusCode = 503;
