@@ -67,22 +67,37 @@ class AnalysisService {
       rawBuffer = await ZoomAuth.download(selection.file_path);
       logger.info(`Audio Zoom descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
     } else if (selection.file_path.startsWith('https://') || selection.file_path.startsWith('http://')) {
+      // Grabación realtime de Aware: intentar HTTP primero, luego SFTP como fallback.
+      // Si ambos fallan, el archivo aún no está disponible (se sincroniza en el scan nocturno ~5am).
+      let audioOk = false;
       try {
         rawBuffer = await downloadBuffer(selection.file_path);
         logger.info(`Audio HTTP descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+        audioOk = true;
       } catch (httpErr) {
-        // La URL HTTP del servidor Aware puede dar 404 si el archivo aún no está disponible
-        // por HTTP pero sí por SFTP. Intentamos ruta SFTP equivalente como fallback.
         const sftpPath = httpUrlToSftpPath(selection.file_path);
-        if (!sftpPath) throw httpErr;
-        logger.warn(`HTTP falló (${httpErr.message}), intentando SFTP: ${sftpPath}`);
-        const sftp = new SFTPService();
-        try {
-          await sftp.connect();
-          rawBuffer = await sftp.getFile(sftpPath);
-          logger.info(`Audio SFTP (fallback) descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
-        } finally {
-          await sftp.disconnect();
+        if (sftpPath) {
+          logger.warn(`HTTP falló (${httpErr.message}), intentando SFTP: ${sftpPath}`);
+          const sftp = new SFTPService();
+          try {
+            await sftp.connect();
+            rawBuffer = await sftp.getFile(sftpPath);
+            logger.info(`Audio SFTP (fallback) descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+            audioOk = true;
+          } catch (sftpErr) {
+            logger.warn(`SFTP también falló: ${sftpErr.message}`);
+          } finally {
+            await sftp.disconnect();
+          }
+        }
+        if (!audioOk) {
+          const userErr = new Error(
+            'El audio de esta grabación aún no está disponible en el servidor de almacenamiento. ' +
+            'Las grabaciones del día actual se sincronizan durante el escaneo nocturno (~5:00 AM). ' +
+            'Por favor, intente nuevamente mañana.'
+          );
+          userErr.statusCode = 503;
+          throw userErr;
         }
       }
     } else {
@@ -362,4 +377,6 @@ class AnalysisService {
   }
 }
 
-module.exports = new AnalysisService();
+const instance = new AnalysisService();
+module.exports = instance;
+module.exports.httpUrlToSftpPath = httpUrlToSftpPath;

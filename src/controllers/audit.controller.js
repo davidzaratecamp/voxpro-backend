@@ -21,23 +21,16 @@ const execFileAsync = promisify(execFile);
  * Para usuarios zoom_enabled: también permite acceso a grabaciones de otros clientes
  * si el agente tiene extensión Zoom bajo un cliente autorizado del usuario.
  */
+const ZOOM_SHARED = new Set(['obama', 'lv']);
+
 async function checkAccess(selection, req) {
   if (!selection) {
     return { status: 404, body: { error: true, message: 'Selección no encontrada' } };
   }
 
-  const hasDirectAccess = req.user.client_codes.includes(selection.client_code);
-  let authorized = hasDirectAccess;
-
-  if (!hasDirectAccess && req.user.zoom_enabled && selection.agent_id) {
-    const agentInZoom = await db('agents as ag')
-      .join('clients as c', 'ag.client_id', 'c.id')
-      .where('ag.cedula', String(selection.agent_id))
-      .whereNotNull('ag.zoom_extension')
-      .whereIn('c.code', req.user.client_codes)
-      .first();
-    authorized = !!agentInZoom;
-  }
+  // Acceso directo por client_codes, O bien zoom_enabled con cliente compartido Obama/LV
+  const authorized = req.user.client_codes.includes(selection.client_code) ||
+    (req.user.zoom_enabled && ZOOM_SHARED.has(selection.client_code));
 
   if (!authorized) {
     return { status: 403, body: { error: true, message: 'Acceso no autorizado' } };
@@ -69,7 +62,6 @@ exports.selectOne = asyncHandler(async (req, res) => {
 
   // Verificar acceso: el usuario tiene el cliente directamente, O bien tiene zoom_enabled
   // y la grabación es de un cliente Zoom compartido (obama/lv comparten fuentes Zoom).
-  const ZOOM_SHARED = new Set(['obama', 'lv']);
   const hasDirectAccess = req.user.client_codes.includes(recording.client_code) ||
     (req.user.zoom_enabled && ZOOM_SHARED.has(recording.client_code));
   if (!hasDirectAccess) {
@@ -261,7 +253,27 @@ exports.streamAudio = asyncHandler(async (req, res) => {
       const audioBuffer = await ZoomAuth.download(selection.file_path);
       fs.writeFileSync(tmpInput, audioBuffer);
     } else if (selection.file_path.startsWith('https://') || selection.file_path.startsWith('http://')) {
-      const audioBuffer = await downloadBuffer(selection.file_path);
+      let audioBuffer;
+      try {
+        audioBuffer = await downloadBuffer(selection.file_path);
+      } catch (httpErr) {
+        // Fallback SFTP para grabaciones realtime cuyo archivo HTTP no está disponible aún
+        const sftpPath = AnalysisService.httpUrlToSftpPath(selection.file_path);
+        if (sftpPath) {
+          try {
+            await sftp.connect();
+            audioBuffer = await sftp.getFile(sftpPath);
+            await sftp.disconnect();
+          } catch {
+            await sftp.disconnect().catch(() => {});
+          }
+        }
+        if (!audioBuffer) {
+          const e = new Error('El audio aún no está disponible. Las grabaciones del día se sincronizan ~5:00 AM.');
+          e.statusCode = 503;
+          throw e;
+        }
+      }
       fs.writeFileSync(tmpInput, audioBuffer);
     } else {
       await sftp.connect();
