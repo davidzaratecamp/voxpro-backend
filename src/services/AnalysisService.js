@@ -9,6 +9,27 @@ const GeminiService = require('./GeminiService');
 const { downloadBuffer } = require('./RealtimeScanService');
 const ZoomAuth = require('./ZoomAuthService');
 const logger = require('../utils/logger');
+const config = require('../config');
+const AWARE_SOURCES = require('../config/sources');
+
+/**
+ * Convierte una URL HTTP de audio Aware a su ruta SFTP equivalente.
+ * Ejemplo: https://10.255.255.30/audiofiles/2026/04/24/Q-xxx.WAV
+ *       → /media/tecnologia/STORAGE/GRABACIONES/AWARE_30/2026/04/24/Q-xxx.WAV
+ */
+function httpUrlToSftpPath(httpUrl) {
+  try {
+    const url = new URL(httpUrl);
+    const host = url.hostname;
+    const source = AWARE_SOURCES.find((s) => s.db && s.db.host === host);
+    if (!source) return null;
+    // El path de la URL es /audiofiles/YYYY/MM/DD/file.WAV — quitamos el prefijo /audiofiles
+    const datePart = url.pathname.replace(/^\/audiofiles\//, '');
+    return `${config.aware.recordingsPath}/${source.folder}/${datePart}`;
+  } catch {
+    return null;
+  }
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -46,8 +67,24 @@ class AnalysisService {
       rawBuffer = await ZoomAuth.download(selection.file_path);
       logger.info(`Audio Zoom descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
     } else if (selection.file_path.startsWith('https://') || selection.file_path.startsWith('http://')) {
-      rawBuffer = await downloadBuffer(selection.file_path);
-      logger.info(`Audio HTTP descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+      try {
+        rawBuffer = await downloadBuffer(selection.file_path);
+        logger.info(`Audio HTTP descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+      } catch (httpErr) {
+        // La URL HTTP del servidor Aware puede dar 404 si el archivo aún no está disponible
+        // por HTTP pero sí por SFTP. Intentamos ruta SFTP equivalente como fallback.
+        const sftpPath = httpUrlToSftpPath(selection.file_path);
+        if (!sftpPath) throw httpErr;
+        logger.warn(`HTTP falló (${httpErr.message}), intentando SFTP: ${sftpPath}`);
+        const sftp = new SFTPService();
+        try {
+          await sftp.connect();
+          rawBuffer = await sftp.getFile(sftpPath);
+          logger.info(`Audio SFTP (fallback) descargado: ${(rawBuffer.length / 1024).toFixed(0)} KB en ${Date.now() - t0}ms`);
+        } finally {
+          await sftp.disconnect();
+        }
+      }
     } else {
       const sftp = new SFTPService();
       try {

@@ -68,21 +68,11 @@ exports.selectOne = asyncHandler(async (req, res) => {
   if (!recording) return res.status(404).json({ error: true, message: 'Grabación no encontrada' });
 
   // Verificar acceso: el usuario tiene el cliente directamente, O bien tiene zoom_enabled
-  // y el agente de la grabación tiene extensión Zoom bajo un cliente autorizado
-  // (caso: agentes Obama con grabaciones Aware en otros clientes como claro_hogar)
-  const hasDirectAccess = req.user.client_codes.includes(recording.client_code);
-  let hasZoomAgentAccess = false;
-  if (!hasDirectAccess && req.user.zoom_enabled) {
-    const agentInZoom = await db('agents as ag')
-      .join('aware_sources as s', 'ag.client_id', 's.client_id')
-      .join('clients as c', 'ag.client_id', 'c.id')
-      .where('ag.cedula', recording.agent_id)
-      .whereNotNull('ag.zoom_extension')
-      .whereIn('c.code', req.user.client_codes)
-      .first();
-    hasZoomAgentAccess = !!agentInZoom;
-  }
-  if (!hasDirectAccess && !hasZoomAgentAccess) {
+  // y la grabación es de un cliente Zoom compartido (obama/lv comparten fuentes Zoom).
+  const ZOOM_SHARED = new Set(['obama', 'lv']);
+  const hasDirectAccess = req.user.client_codes.includes(recording.client_code) ||
+    (req.user.zoom_enabled && ZOOM_SHARED.has(recording.client_code));
+  if (!hasDirectAccess) {
     return res.status(403).json({ error: true, message: 'Acceso no autorizado' });
   }
 

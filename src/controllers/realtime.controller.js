@@ -48,6 +48,11 @@ exports.getAgents = asyncHandler(async (req, res) => {
   const date = req.query.date || new Date().toISOString().slice(0, 10);
   const clientCodes = req.user.client_codes || [];
 
+  // Obama y LV comparten fuentes Zoom (ZOOM_PHONE y ZOOM_PHONE_LV).
+  // Al consultar grabaciones Zoom hay que incluir ambos clientes para no perder agentes
+  // cuyas grabaciones queden registradas bajo el cliente "hermano".
+  const zoomClientCodes = req.user.zoom_enabled ? ['obama', 'lv'] : clientCodes;
+
   const [calls, zoomRows] = await Promise.all([
     RealtimeScanService.getCalls(date, clientCodes),
     req.user.zoom_enabled
@@ -58,7 +63,7 @@ exports.getAgents = asyncHandler(async (req, res) => {
           .where('r.file_date', date)
           .whereNotNull('r.agent_id')
           .where('r.agent_id', '!=', '-1')
-          .whereIn('c.code', clientCodes)
+          .whereIn('c.code', zoomClientCodes)
           .select('r.agent_id', 'r.agent_name', 'r.call_duration')
       : Promise.resolve([]),
   ]);
