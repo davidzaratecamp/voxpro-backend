@@ -474,6 +474,10 @@ class ScannerService {
               agent_name: rec.agent_name,
               agent_extension: rec.agent_extension,
               call_duration: rec.call_duration,
+              digitacion_nomenclatura: rec.digitacion_nomenclatura || null,
+              digitacion_nombre: rec.digitacion_nombre || null,
+              digitacion_obs: rec.digitacion_obs || null,
+              digitacion_motivo_rechazo: rec.digitacion_motivo_rechazo || null,
             };
             if (rec.hangup_by) {
               updateData.hangup_by = rec.hangup_by;

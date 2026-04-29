@@ -184,6 +184,38 @@ Valores posibles:
 
 En caso de duda entre "rejection" y "dropped_call": si el cliente expresó desinterés → "rejection"; si era solo falta de tiempo → "dropped_call".`;
 
+/**
+ * Builds the digitación context block for the Gemini prompt.
+ * Only included when the recording has digitación data from Aware.
+ *
+ * @param {{ nomenclatura: string, nombre: string, obs: string, motivoRechazo: string }} digitacion
+ * @returns {string}
+ */
+function buildSectionDigitacion({ nomenclatura, nombre, obs, motivoRechazo }) {
+  const lines = [
+    `## DIGITACIÓN DEL AGENTE (registrada en el sistema Aware tras la llamada)`,
+    ``,
+    `El agente tipificó esta llamada como:`,
+    `- **Tipificación:** ${nombre || nomenclatura} (código: ${nomenclatura})`,
+  ];
+
+  const obsLimpia = obs && !obs.match(/^\d+,/) ? obs : null;
+  if (obsLimpia) {
+    lines.push(`- **Observación del agente:** "${obsLimpia}"`);
+  }
+  if (motivoRechazo) {
+    lines.push(`- **Motivo de rechazo:** ${motivoRechazo}`);
+  }
+
+  lines.push(``);
+  lines.push(`Usa esta información como contexto adicional al evaluar el criterio **tipificacion_correcta**:`);
+  lines.push(`- Si la tipificación coincide con lo que ocurrió en la llamada → el criterio cumple.`);
+  lines.push(`- Si la tipificación NO coincide con lo que se escucha en el audio (ej: el agente marcó UTIL POSITIVO pero el cliente rechazó claramente) → el criterio no cumple. Incluye cita y explicación.`);
+  lines.push(`- Si el cliente no estaba disponible o la llamada fue cortada y el agente marcó GRB, NC, ERC, EO, FS, etc. → generalmente cumple (son tipificaciones técnicas, no de gestión).`);
+
+  return lines.join('\n');
+}
+
 module.exports = {
   SECTION_ROLE_DEFINITION,
   SECTION_TRANSCRIPTION_TASK,
@@ -196,4 +228,5 @@ module.exports = {
   SECTION_ADDITIONAL_RULES,
   SECTION_SCORE_CALC,
   SECTION_CALL_SITUATION,
+  buildSectionDigitacion,
 };

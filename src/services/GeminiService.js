@@ -19,6 +19,7 @@ const {
   SECTION_ADDITIONAL_RULES,
   SECTION_SCORE_CALC,
   SECTION_CALL_SITUATION,
+  buildSectionDigitacion,
 } = require('../config/promptSections');
 
 /**
@@ -96,20 +97,20 @@ class GeminiService {
    * @param {number} [proyectoId] - ID del proyecto en Aware (para LV: distingue Ventas vs Customer)
    * @returns {{ transcription: string, evaluation: object }}
    */
-  async analyzeCall(audioBuffer, clientCode, agentId, proyectoId, mimeType = 'audio/ogg') {
+  async analyzeCall(audioBuffer, clientCode, agentId, proyectoId, mimeType = 'audio/ogg', digitacion = null) {
     const campaignKey = await resolveCampaignKey(clientCode, agentId, proyectoId);
     const criteria = await CriteriaService.getByKey(campaignKey);
 
     await this.semaphore.acquire();
     try {
-      return await this._doAnalyzeCall(audioBuffer, criteria, mimeType);
+      return await this._doAnalyzeCall(audioBuffer, criteria, mimeType, digitacion);
     } finally {
       this.semaphore.release();
     }
   }
 
-  async _doAnalyzeCall(audioBuffer, criteria, mimeType = 'audio/ogg') {
-    const prompt = this._buildPrompt(criteria);
+  async _doAnalyzeCall(audioBuffer, criteria, mimeType = 'audio/ogg', digitacion = null) {
+    const prompt = this._buildPrompt(criteria, digitacion);
     const sizeKB = (audioBuffer.length / 1024).toFixed(0);
     logger.info(`Subiendo audio a Gemini File API (${sizeKB} KB) para ${criteria.label}`);
 
@@ -218,7 +219,7 @@ class GeminiService {
   /**
    * Construye el prompt de evaluación con los criterios del cliente.
    */
-  _buildPrompt(criteria) {
+  _buildPrompt(criteria, digitacion = null) {
     const generalList = criteria.general
       .map((c) => {
         const desc = c.description?.trim() ? `\n    → ${c.description}` : '';
@@ -244,6 +245,10 @@ class GeminiService {
       return `## INSTRUCCIONES ADICIONALES\n${si}`;
     })();
 
+    const digitacionBlock = digitacion?.nomenclatura
+      ? buildSectionDigitacion(digitacion)
+      : null;
+
     const sections = [
       SECTION_ROLE_DEFINITION,
       SECTION_TRANSCRIPTION_TASK,
@@ -258,6 +263,7 @@ class GeminiService {
       SECTION_ADDITIONAL_RULES,
       SECTION_SCORE_CALC,
       SECTION_CALL_SITUATION,
+      digitacionBlock,
       specialBlock,
       this._buildResponseFormat(criteria),
     ].filter(Boolean);

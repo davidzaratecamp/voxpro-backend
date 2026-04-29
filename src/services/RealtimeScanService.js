@@ -248,9 +248,16 @@ class RealtimeScanService {
                rl.proyecto_id,
                rl.registro_llamada_fono    AS phone,
                rl.call_id,
-               rl.uniqueid
+               rl.uniqueid,
+               rl.nomenclatura_id,
+               n.nomenclatura_nombre,
+               rl.registro_llamada_obs     AS digitacion_obs,
+               nr.descripcion              AS digitacion_motivo_rechazo
              FROM registro_llamada rl
              LEFT JOIN empleado e ON rl.agente_id = e.empleado_rut
+             LEFT JOIN nomenclatura n ON rl.nomenclatura_id = n.nomenclatura_id
+                                     AND rl.proyecto_id = n.proyecto_id
+             LEFT JOIN nomenclatura_rechazo nr ON rl.motivo_rechazo_id = nr.nomenclatura_rechazo_id
              WHERE rl.registro_llamada_fecha = $1
                AND rl.agente_id IS NOT NULL
                AND rl.call_time > 0
@@ -267,21 +274,25 @@ class RealtimeScanService {
               r.call_id,
             );
             return {
-              sourceKey:           `${src.db.host}:${src.db.database}`,
-              folder:              src.folder,
-              clientCode:          src.clientCode,
-              clientName:          src.clientName,
-              schema:              src.schema,
-              audioBaseUrl:        src.audioBaseUrl,
-              registro_llamada_id: r.registro_llamada_id,
-              agent_id:            r.agent_id,
-              agent_name:          r.agent_name,
-              duration:            r.duration,
-              file_date:           toDateStr(r.file_date),
-              proyecto_id:         r.proyecto_id,
-              hangup_src:          null,
-              audio_url:           audioUrl,
-              file_name:           audioUrl.split('/').pop(),
+              sourceKey:                   `${src.db.host}:${src.db.database}`,
+              folder:                      src.folder,
+              clientCode:                  src.clientCode,
+              clientName:                  src.clientName,
+              schema:                      src.schema,
+              audioBaseUrl:                src.audioBaseUrl,
+              registro_llamada_id:         r.registro_llamada_id,
+              agent_id:                    r.agent_id,
+              agent_name:                  r.agent_name,
+              duration:                    r.duration,
+              file_date:                   toDateStr(r.file_date),
+              proyecto_id:                 r.proyecto_id,
+              hangup_src:                  null,
+              audio_url:                   audioUrl,
+              file_name:                   audioUrl.split('/').pop(),
+              nomenclatura_id:             r.nomenclatura_id || null,
+              nomenclatura_nombre:         r.nomenclatura_nombre || null,
+              digitacion_obs:              r.digitacion_obs || null,
+              digitacion_motivo_rechazo:   r.digitacion_motivo_rechazo || null,
             };
           });
         }
@@ -380,9 +391,16 @@ class RealtimeScanService {
                  rl.registro_llamada_fecha   AS file_date,
                  rl.proyecto_id,
                  rl.registro_llamada_fono    AS phone,
-                 rl.call_id
+                 rl.call_id,
+                 rl.nomenclatura_id,
+                 n.nomenclatura_nombre,
+                 rl.registro_llamada_obs     AS digitacion_obs,
+                 nr.descripcion              AS digitacion_motivo_rechazo
                FROM registro_llamada rl
                LEFT JOIN empleado e ON rl.agente_id = e.empleado_rut
+               LEFT JOIN nomenclatura n ON rl.nomenclatura_id = n.nomenclatura_id
+                                       AND rl.proyecto_id = n.proyecto_id
+               LEFT JOIN nomenclatura_rechazo nr ON rl.motivo_rechazo_id = nr.nomenclatura_rechazo_id
                WHERE rl.registro_llamada_fecha = $1
                  AND rl.agente_id::text = $2
                  AND rl.call_time > 120
@@ -393,22 +411,26 @@ class RealtimeScanService {
             rows = result.rows.map((r) => {
               const audioUrl = buildStandardAudioUrl(src.audioBaseUrl, r.file_date, r.phone, r.call_id);
               return {
-                sourceKey:           `${src.db.host}:${src.db.database}`,
-                folder:              src.folder,
-                clientCode:          src.clientCode,
-                clientName:          src.clientName,
-                schema:              src.schema,
-                audioBaseUrl:        src.audioBaseUrl,
-                registro_llamada_id: r.registro_llamada_id,
-                agent_id:            r.agent_id,
-                agent_name:          r.agent_name,
-                duration:            r.duration,
-                file_date:           toDateStr(r.file_date),
-                proyecto_id:         r.proyecto_id,
-                hangup_src:          null,
-                call_phone:          r.phone,
-                audio_url:           audioUrl,
-                file_name:           audioUrl.split('/').pop(),
+                sourceKey:                   `${src.db.host}:${src.db.database}`,
+                folder:                      src.folder,
+                clientCode:                  src.clientCode,
+                clientName:                  src.clientName,
+                schema:                      src.schema,
+                audioBaseUrl:                src.audioBaseUrl,
+                registro_llamada_id:         r.registro_llamada_id,
+                agent_id:                    r.agent_id,
+                agent_name:                  r.agent_name,
+                duration:                    r.duration,
+                file_date:                   toDateStr(r.file_date),
+                proyecto_id:                 r.proyecto_id,
+                hangup_src:                  null,
+                call_phone:                  r.phone,
+                audio_url:                   audioUrl,
+                file_name:                   audioUrl.split('/').pop(),
+                nomenclatura_id:             r.nomenclatura_id || null,
+                nomenclatura_nombre:         r.nomenclatura_nombre || null,
+                digitacion_obs:              r.digitacion_obs || null,
+                digitacion_motivo_rechazo:   r.digitacion_motivo_rechazo || null,
               };
             });
           }

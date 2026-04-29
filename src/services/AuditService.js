@@ -418,7 +418,11 @@ class AuditService {
         'r.call_id',
         'r.agent_extension',
         'r.hangup_by',
-        'r.proyecto_id'
+        'r.proyecto_id',
+        'r.digitacion_nomenclatura',
+        'r.digitacion_nombre',
+        'r.digitacion_obs',
+        'r.digitacion_motivo_rechazo'
       )
       .first();
 

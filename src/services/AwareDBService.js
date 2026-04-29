@@ -70,9 +70,13 @@ class AwareDBService {
                  u.user_fullname AS agent_name,
                  u.extension AS agent_extension,
                  rl.time_speaking AS call_duration,
-                 rl.proyecto_id
+                 rl.proyecto_id,
+                 rl.nomenclatura_id,
+                 n.nomenclatura_nombre,
+                 rl.registro_llamada_obs AS digitacion_obs
           FROM registro_llamada rl
           LEFT JOIN usuario u ON rl.agente_id = u.user_id
+          LEFT JOIN nomenclatura n ON rl.nomenclatura_id = n.nomenclatura_id
           WHERE rl.call_id::text = ANY($1::text[])
             AND rl.registro_llamada_fecha = ANY($2::date[])
         `;
@@ -105,9 +109,16 @@ class AwareDBService {
                    COALESCE(e.empleado_ext, rl.anexo) AS agent_extension,
                    rl.call_time AS call_duration,
                    rl.uniqueid,
-                   rl.proyecto_id
+                   rl.proyecto_id,
+                   rl.nomenclatura_id,
+                   n.nomenclatura_nombre,
+                   rl.registro_llamada_obs AS digitacion_obs,
+                   nr.descripcion AS digitacion_motivo_rechazo
             FROM registro_llamada rl
             LEFT JOIN empleado e ON rl.agente_id = e.empleado_rut
+            LEFT JOIN nomenclatura n ON rl.nomenclatura_id = n.nomenclatura_id
+                                    AND rl.proyecto_id = n.proyecto_id
+            LEFT JOIN nomenclatura_rechazo nr ON rl.motivo_rechazo_id = nr.nomenclatura_rechazo_id
             WHERE rl.call_id = ANY($1::int[])
               AND rl.registro_llamada_fecha = ANY($2::date[])
               ${anexoFilter}
@@ -137,9 +148,16 @@ class AwareDBService {
                    COALESCE(e.empleado_ext, rl.anexo) AS agent_extension,
                    rl.call_time AS call_duration,
                    rl.uniqueid,
-                   rl.proyecto_id
+                   rl.proyecto_id,
+                   rl.nomenclatura_id,
+                   n.nomenclatura_nombre,
+                   rl.registro_llamada_obs AS digitacion_obs,
+                   nr.descripcion AS digitacion_motivo_rechazo
             FROM registro_llamada rl
             LEFT JOIN empleado e ON rl.agente_id = e.empleado_rut
+            LEFT JOIN nomenclatura n ON rl.nomenclatura_id = n.nomenclatura_id
+                                    AND rl.proyecto_id = n.proyecto_id
+            LEFT JOIN nomenclatura_rechazo nr ON rl.motivo_rechazo_id = nr.nomenclatura_rechazo_id
             WHERE rl.uniqueid = ANY($1::text[])
               AND rl.registro_llamada_fecha = ANY($2::date[])
               ${anexoFilter}
@@ -325,6 +343,10 @@ class AwareDBService {
       call_duration: row.call_duration != null ? parseInt(row.call_duration) : null,
       hangup_by: null,
       proyecto_id: row.proyecto_id != null ? parseInt(row.proyecto_id) : null,
+      digitacion_nomenclatura: row.nomenclatura_id ? String(row.nomenclatura_id).trim() : null,
+      digitacion_nombre: row.nomenclatura_nombre ? row.nomenclatura_nombre.trim() : null,
+      digitacion_obs: row.digitacion_obs ? String(row.digitacion_obs).trim() : null,
+      digitacion_motivo_rechazo: row.digitacion_motivo_rechazo ? String(row.digitacion_motivo_rechazo).trim() : null,
     };
   }
 }

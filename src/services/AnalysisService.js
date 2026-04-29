@@ -44,7 +44,12 @@ class AnalysisService {
     const selection = await db('audit_selections as a')
       .join('recordings as r', 'a.recording_id', 'r.id')
       .where('a.id', selectionId)
-      .select('a.id', 'a.recording_id', 'a.client_code', 'a.agent_id', 'a.agent_name', 'r.file_path', 'r.file_name', 'r.proyecto_id')
+      .select(
+        'a.id', 'a.recording_id', 'a.client_code', 'a.agent_id', 'a.agent_name',
+        'r.file_path', 'r.file_name', 'r.proyecto_id',
+        'r.digitacion_nomenclatura', 'r.digitacion_nombre',
+        'r.digitacion_obs', 'r.digitacion_motivo_rechazo'
+      )
       .first();
 
     if (!selection) {
@@ -160,12 +165,21 @@ class AnalysisService {
 
     // 3. Enviar a Gemini para transcripción + evaluación
     const tGemini = Date.now();
+    const digitacion = selection.digitacion_nomenclatura
+      ? {
+          nomenclatura: selection.digitacion_nomenclatura,
+          nombre: selection.digitacion_nombre,
+          obs: selection.digitacion_obs,
+          motivoRechazo: selection.digitacion_motivo_rechazo,
+        }
+      : null;
     const { transcription, evaluation } = await GeminiService.analyzeCall(
       audioBuffer,
       selection.client_code,
       selection.agent_id,
       selection.proyecto_id,
-      mimeType
+      mimeType,
+      digitacion
     );
     logger.info(`Gemini completado en ${Date.now() - tGemini}ms`);
 

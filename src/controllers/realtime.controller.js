@@ -271,17 +271,21 @@ exports.selectCall = asyncHandler(async (req, res) => {
       recordingId = existing.id;
     } else {
       [recordingId] = await trx('recordings').insert({
-        aware_source_id: source.id,
-        file_name:       call.file_name,
-        file_path:       call.audio_url,
-        file_path_hash:  pathHash,
-        file_date:       call.file_date,
-        agent_id:        call.agent_id,
-        agent_name:      call.agent_name,
-        call_duration:   call.duration || null,
-        proyecto_id:     call.proyecto_id || null,
-        agent_enriched:  true,
-        status:          'pending',
+        aware_source_id:              source.id,
+        file_name:                    call.file_name,
+        file_path:                    call.audio_url,
+        file_path_hash:               pathHash,
+        file_date:                    call.file_date,
+        agent_id:                     call.agent_id,
+        agent_name:                   call.agent_name,
+        call_duration:                call.duration || null,
+        proyecto_id:                  call.proyecto_id || null,
+        agent_enriched:               true,
+        status:                       'pending',
+        digitacion_nomenclatura:      call.nomenclatura_id || null,
+        digitacion_nombre:            call.nomenclatura_nombre || null,
+        digitacion_obs:               call.digitacion_obs || null,
+        digitacion_motivo_rechazo:    call.digitacion_motivo_rechazo || null,
       });
     }
 
