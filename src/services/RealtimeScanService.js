@@ -255,8 +255,12 @@ class RealtimeScanService {
                nr.descripcion              AS digitacion_motivo_rechazo
              FROM registro_llamada rl
              LEFT JOIN empleado e ON rl.agente_id = e.empleado_rut
-             LEFT JOIN nomenclatura n ON rl.nomenclatura_id = n.nomenclatura_id
-                                     AND rl.proyecto_id = n.proyecto_id
+             LEFT JOIN LATERAL (
+               SELECT nomenclatura_nombre FROM nomenclatura
+               WHERE nomenclatura_id = rl.nomenclatura_id
+               ORDER BY (proyecto_id = rl.proyecto_id) DESC
+               LIMIT 1
+             ) n ON true
              LEFT JOIN nomenclatura_rechazo nr ON rl.motivo_rechazo_id = nr.nomenclatura_rechazo_id
              WHERE rl.registro_llamada_fecha = $1
                AND rl.agente_id IS NOT NULL
@@ -398,8 +402,12 @@ class RealtimeScanService {
                  nr.descripcion              AS digitacion_motivo_rechazo
                FROM registro_llamada rl
                LEFT JOIN empleado e ON rl.agente_id = e.empleado_rut
-               LEFT JOIN nomenclatura n ON rl.nomenclatura_id = n.nomenclatura_id
-                                       AND rl.proyecto_id = n.proyecto_id
+               LEFT JOIN LATERAL (
+                 SELECT nomenclatura_nombre FROM nomenclatura
+                 WHERE nomenclatura_id = rl.nomenclatura_id
+                 ORDER BY (proyecto_id = rl.proyecto_id) DESC
+                 LIMIT 1
+               ) n ON true
                LEFT JOIN nomenclatura_rechazo nr ON rl.motivo_rechazo_id = nr.nomenclatura_rechazo_id
                WHERE rl.registro_llamada_fecha = $1
                  AND rl.agente_id::text = $2
