@@ -18,12 +18,30 @@ const logger    = require('../utils/logger');
  *      agentes pendientes — cuando aparezcan en Aware se resuelven solos.
  */
 class ZoomScannerService {
+  constructor() {
+    this._isRunning = false;
+  }
+
   /**
    * Escanea las grabaciones de un día específico.
    * @param {object} options
    * @param {string} [options.targetDate] - Fecha YYYY-MM-DD (default: ayer)
    */
   async run({ targetDate } = {}) {
+    if (this._isRunning) {
+      logger.warn('Zoom: scan ya en progreso, omitiendo ejecución concurrente');
+      return { found: 0, inserted: 0, skipped: 0, errors: 0 };
+    }
+    this._isRunning = true;
+
+    try {
+      return await this._run({ targetDate });
+    } finally {
+      this._isRunning = false;
+    }
+  }
+
+  async _run({ targetDate } = {}) {
     const date = targetDate || this._yesterday();
 
     // Obtener la fuente ZOOM_PHONE de Obama
@@ -64,11 +82,15 @@ class ZoomScannerService {
 
     logger.info(`Zoom: ${recordings.length} grabaciones encontradas para ${date}`);
 
+    // Cargar candidatos Aware UNA SOLA VEZ para todo el run (evita N queries idénticas)
+    const awareAgents = await this._fetchAwareCandidates();
+    logger.info(`Zoom: ${awareAgents.length} agentes Aware cargados para auto-match`);
+
     const summary = { found: recordings.length, inserted: 0, skipped: 0, errors: 0 };
 
     for (const rec of recordings) {
       try {
-        const result = await this._insertRecording(rec, source, lvSource, lvCedulaSet);
+        const result = await this._insertRecording(rec, source, lvSource, lvCedulaSet, awareAgents);
         if (result === 'inserted') summary.inserted++;
         else summary.skipped++;
       } catch (err) {
@@ -79,7 +101,7 @@ class ZoomScannerService {
 
     // Al final de cada scan, reintentar agentes que aún no tienen cédula.
     // Cuando aparezcan en Aware, se resuelven solos en el siguiente ciclo.
-    const resolved = await this.resolveUnmatchedAgents(lvSource, lvCedulaSet);
+    const resolved = await this.resolveUnmatchedAgents(lvSource, lvCedulaSet, awareAgents);
     if (resolved.resolved > 0) {
       logger.info(`Zoom: resueltos ${resolved.resolved}/${resolved.checked} agentes pendientes`);
     }
@@ -148,7 +170,7 @@ class ZoomScannerService {
     return new Set(all.map((a) => String(a.agent_id)));
   }
 
-  async _insertRecording(rec, source, lvSource, lvCedulaSet) {
+  async _insertRecording(rec, source, lvSource, lvCedulaSet, awareAgents = null) {
     if (!rec.download_url) return 'skipped';
 
     const pathHash = crypto.createHash('sha256').update(rec.download_url).digest('hex');
@@ -187,7 +209,7 @@ class ZoomScannerService {
         agentName = agentRow.name;
       } else if (zoomName) {
         // 2. Auto-match fuzzy contra grabaciones Aware
-        const matched = await this._autoMatchAgent(agentExt, zoomName, source.client_id);
+        const matched = await this._autoMatchAgent(agentExt, zoomName, source.client_id, awareAgents);
         if (matched) {
           agentId   = matched.cedula;
           agentName = matched.name;
@@ -239,7 +261,7 @@ class ZoomScannerService {
    * (aunque sea días después), en el siguiente scan queda resuelto y sus
    * grabaciones existentes se actualizan en masa.
    */
-  async resolveUnmatchedAgents(lvSource = null, lvCedulaSet = null) {
+  async resolveUnmatchedAgents(lvSource = null, lvCedulaSet = null, awareAgents = null) {
     const unmatched = await db('agents')
       .whereNull('cedula')
       .whereNotNull('zoom_extension')
@@ -249,7 +271,7 @@ class ZoomScannerService {
     let resolved = 0;
 
     for (const agent of unmatched) {
-      const matched = await this._autoMatchAgent(agent.zoom_extension, agent.name, agent.client_id);
+      const matched = await this._autoMatchAgent(agent.zoom_extension, agent.name, agent.client_id, awareAgents);
       if (!matched) continue;
 
       // Actualizar cédula y nombre en todas las grabaciones de esta extensión
@@ -272,18 +294,33 @@ class ZoomScannerService {
   }
 
   /**
+   * Obtiene la lista de agentes distintos de grabaciones Aware.
+   * Se llama una vez por run y el resultado se pasa a _autoMatchAgent.
+   */
+  async _fetchAwareCandidates() {
+    return db('recordings as r')
+      .join('aware_sources as s', 'r.aware_source_id', 's.id')
+      .where('s.source_type', '!=', 'zoom')
+      .whereNotNull('r.agent_id')
+      .whereNotNull('r.agent_name')
+      .distinct('r.agent_id', 'r.agent_name')
+      .limit(2000);
+  }
+
+  /**
    * Intenta resolver la cédula de un agente Zoom buscando su nombre en las
    * grabaciones Aware del mismo cliente mediante coincidencia difusa de tokens.
    *
    * Si encuentra un candidato confiable (≥2 tokens en común, score ≥ 0.5),
    * guarda el mapeo en la tabla `agents` para futuras grabaciones.
    *
-   * @param {string} extension - Extensión Zoom del agente
-   * @param {string} zoomName  - Nombre completo tal como viene de la API Zoom
-   * @param {number} clientId  - client_id de la fuente Zoom
+   * @param {string} extension  - Extensión Zoom del agente
+   * @param {string} zoomName   - Nombre completo tal como viene de la API Zoom
+   * @param {number} clientId   - client_id de la fuente Zoom
+   * @param {Array}  candidates - Lista pre-cargada de agentes Aware (opcional)
    * @returns {{ cedula: string, name: string } | null}
    */
-  async _autoMatchAgent(extension, zoomName, clientId) {
+  async _autoMatchAgent(extension, zoomName, clientId, candidates = null) {
     const normalize = (str) =>
       str
         .toLowerCase()
@@ -298,14 +335,8 @@ class ZoomScannerService {
 
     if (tokens.length === 0) return null;
 
-    // Candidatos: agentes distintos en todas las grabaciones Aware (cualquier cliente)
-    const candidates = await db('recordings as r')
-      .join('aware_sources as s', 'r.aware_source_id', 's.id')
-      .where('s.source_type', '!=', 'zoom')
-      .whereNotNull('r.agent_id')
-      .whereNotNull('r.agent_name')
-      .distinct('r.agent_id', 'r.agent_name')
-      .limit(2000);
+    // Usar candidatos pre-cargados si están disponibles; si no, cargar en el momento
+    if (!candidates) candidates = await this._fetchAwareCandidates();
 
     let best        = null;
     let bestScore   = 0;
