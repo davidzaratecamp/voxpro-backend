@@ -1,12 +1,17 @@
 exports.up = async (knex) => {
-  await knex.schema.table('recordings', (t) => {
-    // Cubre SELECT DISTINCT agent_id, agent_name — evita full scan + temp table
-    t.index(['agent_id', 'agent_name'], 'idx_agent_id_name');
-  });
+  const recIndexes = await knex.raw("SHOW INDEX FROM recordings WHERE Key_name = 'idx_agent_id_name'");
+  if (recIndexes[0].length === 0) {
+    await knex.schema.table('recordings', (t) => {
+      t.index(['agent_id', 'agent_name'], 'idx_agent_id_name');
+    });
+  }
 
-  await knex.schema.table('aware_sources', (t) => {
-    t.index(['source_type'], 'idx_source_type');
-  });
+  const srcIndexes = await knex.raw("SHOW INDEX FROM aware_sources WHERE Key_name = 'idx_source_type'");
+  if (srcIndexes[0].length === 0) {
+    await knex.schema.table('aware_sources', (t) => {
+      t.index(['source_type'], 'idx_source_type');
+    });
+  }
 };
 
 exports.down = async (knex) => {
