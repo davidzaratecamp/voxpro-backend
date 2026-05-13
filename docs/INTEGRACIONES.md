@@ -43,6 +43,7 @@ VoxPro Backend (200.91.204.51)
     ▼
 Kraken (10.255.255.95)          ← servidor puente en la red interna
     │
+    
     ├──► Aware AWARE_30 (10.255.255.30)
     ├──► Aware AWARE_31 (10.255.255.31)
     ├──► Aware AWARE_5  (10.255.255.5)

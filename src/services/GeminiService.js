@@ -158,6 +158,9 @@ class GeminiService {
           return this._parseResponse(response, criteria);
         });
       } catch (err) {
+        // Spending cap: no sirve probar otros modelos, el proyecto entero está bloqueado
+        if (err.isSpendingCap) throw err;
+
         const is503 = err.status === 503 || err.message?.includes('503') || err.message?.includes('high demand');
         const is429 = err.status === 429 || err.message?.includes('429') || err.message?.includes('Resource exhausted');
         const hasMoreFallbacks = i < modelsToTry.length - 1;
@@ -186,6 +189,14 @@ class GeminiService {
       try {
         return await fn();
       } catch (err) {
+        // Spending cap mensual: no tiene solución reintentando ni cambiando modelo
+        if (err.message?.includes('spending cap') || err.message?.includes('monthly spending')) {
+          const capErr = new Error('Límite de gasto mensual de Gemini alcanzado. El análisis automático no está disponible temporalmente.');
+          capErr.statusCode = 503;
+          capErr.isSpendingCap = true;
+          throw capErr;
+        }
+
         const status = err.status || err.httpStatusCode || err.code;
         const isRateLimit = status === 429 || err.message?.includes('429') || err.message?.includes('Resource exhausted');
         const isJsonError = err.message?.includes('JSON') || err.message?.includes('no es JSON válido');

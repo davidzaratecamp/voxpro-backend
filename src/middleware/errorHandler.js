@@ -3,6 +3,15 @@ const logger = require('../utils/logger');
 function errorHandler(err, req, res, _next) {
   logger.error(`${req.method} ${req.originalUrl} - ${err.message}`, err);
 
+  // Spending cap mensual: no se recupera reintentando, el proyecto está bloqueado
+  const isSpendingCap = err.isSpendingCap || err.message?.includes('spending cap') || err.message?.includes('monthly spending');
+  if (isSpendingCap) {
+    return res.status(503).json({
+      error: true,
+      message: 'El análisis automático con IA no está disponible (límite de gasto mensual de Gemini alcanzado). Puedes completar la evaluación manualmente en el formulario a continuación.',
+    });
+  }
+
   // Detectar rate limit de Gemini (429) y devolver mensaje claro al cliente
   const isGeminiRateLimit =
     err.statusCode === 429 ||
