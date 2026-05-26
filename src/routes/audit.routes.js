@@ -11,6 +11,8 @@ router.post('/selections/:id/reanalyze', ctrl.reanalyze);
 router.get('/selections/:id/analysis', ctrl.getAnalysis);
 router.patch('/selections/:id/analysis', ctrl.updateAnalysis);
 router.get('/selections/:id/audio', ctrl.streamAudio);
+router.get('/selections/:id/criteria-template', ctrl.getCriteriaTemplate);
+router.post('/selections/:id/qualify-manual', ctrl.qualifyManual);
 router.get('/agents-performance', ctrl.agentsPerformance);
 router.get('/agents/:agentId/audits', ctrl.agentAudits);
 router.get('/summary', ctrl.summary);

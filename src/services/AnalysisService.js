@@ -413,6 +413,140 @@ class AnalysisService {
 
     return { selectionId, score, changes: changesList.length };
   }
+
+  /**
+   * Califica una llamada manualmente sin usar IA.
+   * Si ya existe una evaluación previa, la sobreescribe y registra los cambios.
+   * Si no hay evaluación previa, inserta una nueva.
+   */
+  async qualifyManually(selectionId, { criteria, notes, user }) {
+    const selection = await db('audit_selections as a')
+      .join('recordings as r', 'a.recording_id', 'r.id')
+      .where('a.id', selectionId)
+      .select('a.id', 'a.recording_id', 'a.client_code', 'a.agent_name')
+      .first();
+
+    if (!selection) throw new Error(`Selección no encontrada: ${selectionId}`);
+
+    const { score, highImpactFailed } = this._calcScore(criteria);
+
+    const criteriaJson = JSON.stringify({
+      general: criteria.general,
+      highImpact: criteria.highImpact,
+      highImpactFailed,
+    });
+
+    const existing = await db('qa_evaluations')
+      .where('recording_id', selection.recording_id)
+      .orderBy('created_at', 'desc')
+      .select('id', 'score', 'criteria')
+      .first();
+
+    await db.transaction(async (trx) => {
+      if (existing) {
+        // Detectar cambios respecto a la evaluación anterior
+        const oldCriteria = typeof existing.criteria === 'string'
+          ? JSON.parse(existing.criteria)
+          : existing.criteria;
+
+        const changesList = [];
+        const oldHI = oldCriteria.highImpact || [];
+        const newHI = criteria.highImpact || [];
+        for (let i = 0; i < newHI.length; i++) {
+          const o = oldHI[i];
+          const n = newHI[i];
+          if (o && n && o.cumple !== n.cumple) {
+            changesList.push({
+              key: n.key, type: 'high_impact', label: n.label,
+              from: o.cumple ? 'Cumple' : 'No Cumple',
+              to: n.cumple ? 'Cumple' : 'No Cumple',
+            });
+          }
+        }
+        const oldGen = oldCriteria.general || [];
+        const newGen = criteria.general || [];
+        for (let i = 0; i < newGen.length; i++) {
+          const o = oldGen[i];
+          const n = newGen[i];
+          if (o && n && o.cumple !== n.cumple && !n.na) {
+            changesList.push({
+              key: n.key, type: 'general', label: n.label,
+              from: o.cumple ? 'Cumple' : 'No Cumple',
+              to: n.cumple ? 'Cumple' : 'No Cumple',
+            });
+          }
+        }
+
+        await trx('evaluation_changes').insert({
+          qa_evaluation_id: existing.id,
+          selection_id: selectionId,
+          user_id: user.id,
+          user_name: user.name,
+          changes: JSON.stringify(changesList),
+          score_before: existing.score,
+          score_after: score,
+        });
+
+        await trx('qa_evaluations').where('id', existing.id).update({
+          score,
+          criteria: criteriaJson,
+          evaluator: 'manual',
+          summary: notes || null,
+        });
+      } else {
+        await trx('qa_evaluations').insert({
+          recording_id: selection.recording_id,
+          transcription_id: null,
+          score,
+          original_score: score,
+          criteria: criteriaJson,
+          original_criteria: criteriaJson,
+          summary: notes || null,
+          evaluator: 'manual',
+        });
+      }
+
+      await trx('audit_selections').where('id', selectionId).update({
+        status: 'completed',
+        score,
+        notes: notes || null,
+        updated_at: db.fn.now(),
+      });
+
+      await trx('recordings').where('id', selection.recording_id).update({
+        status: 'analyzed',
+        processed_at: db.fn.now(),
+        updated_at: db.fn.now(),
+      });
+    });
+
+    logger.info(`Calificación manual guardada para selección ${selectionId}`, {
+      agent: selection.agent_name,
+      score,
+      highImpactFailed,
+      by: user.name,
+    });
+
+    return { selectionId, score, highImpactFailed };
+  }
+
+  _calcScore(criteria) {
+    const highImpact = criteria.highImpact || [];
+    const general = criteria.general || [];
+    const hasFail = highImpact.some((i) => !i.cumple);
+    if (hasFail) return { score: 0, highImpactFailed: true };
+    let applicable = 0;
+    let earned = 0;
+    for (const item of general) {
+      if (item.na) continue;
+      applicable += item.weight;
+      if (item.cumple) earned += item.weight;
+    }
+    return {
+      score: applicable > 0 ? Math.round((earned / applicable) * 100) : 0,
+      highImpactFailed: false,
+    };
+  }
 }
 
 const instance = new AnalysisService();

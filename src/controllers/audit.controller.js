@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const AuditService = require('../services/AuditService');
 const AnalysisService = require('../services/AnalysisService');
+const { CRITERIA } = require('../config/evaluationCriteria');
 const SFTPService = require('../services/SFTPService');
 const { downloadBuffer, downloadBufferViaTunnel } = require('../services/RealtimeScanService');
 const ZoomAuth = require('../services/ZoomAuthService');
@@ -326,4 +327,64 @@ exports.summary = asyncHandler(async (req, res) => {
   const filterUserId = role === 'supervisor_calidad' ? null : userId;
   const result = await AuditService.summary(clientCodes, filterUserId);
   res.json({ data: result });
+});
+
+function criteriaKeyFromSelection(clientCode, campaignType) {
+  if (clientCode === 'obama') {
+    return campaignType === 'customer' ? 'obama_customer' : 'obama_ventas';
+  }
+  if (clientCode === 'lv') {
+    return campaignType === 'customer' ? 'lv_customer' : 'lv_ventas';
+  }
+  if (clientCode === 'claro_wcb') {
+    if (campaignType === 'movil') return 'claro_movil';
+    if (campaignType === 'pymes') return 'claro_pymes';
+    return 'claro_wcb';
+  }
+  return clientCode;
+}
+
+exports.getCriteriaTemplate = asyncHandler(async (req, res) => {
+  const selection = await AuditService.getById(req.params.id);
+  const err = await checkAccess(selection, req);
+  if (err) return res.status(err.status).json(err.body);
+
+  const key = criteriaKeyFromSelection(selection.client_code, selection.campaign_type);
+  const template = CRITERIA[key];
+  if (!template) {
+    return res.status(404).json({ error: true, message: 'Criterios no encontrados para este cliente/campaña' });
+  }
+
+  const general = template.general.map((item) => ({
+    ...item,
+    cumple: true,
+    na: false,
+    observacion: '',
+    cita: '',
+    timestamp: null,
+  }));
+  const highImpact = template.highImpact.map((item) => ({
+    ...item,
+    cumple: true,
+    observacion: '',
+    cita: '',
+    timestamp: null,
+  }));
+
+  res.json({ data: { label: template.label, general, highImpact } });
+});
+
+exports.qualifyManual = asyncHandler(async (req, res) => {
+  const selection = await AuditService.getById(req.params.id);
+  const err = await checkAccess(selection, req);
+  if (err) return res.status(err.status).json(err.body);
+
+  const { criteria, notes } = req.body;
+  if (!criteria || !Array.isArray(criteria.general) || !Array.isArray(criteria.highImpact)) {
+    return res.status(400).json({ error: true, message: 'Se requieren criteria.general y criteria.highImpact' });
+  }
+
+  const user = { id: req.user.id, name: req.user.name };
+  const result = await AnalysisService.qualifyManually(req.params.id, { criteria, notes, user });
+  res.json({ message: 'Calificación manual guardada', data: result });
 });
