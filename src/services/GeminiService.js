@@ -1,8 +1,4 @@
 const { GoogleGenerativeAI } = require('@google/generative-ai');
-const { GoogleAIFileManager } = require('@google/generative-ai/server');
-const os = require('os');
-const fs = require('fs');
-const path = require('path');
 const config = require('../config');
 const logger = require('../utils/logger');
 const { LV_CUSTOMER_PROYECTO } = require('../config/evaluationCriteria');
@@ -85,7 +81,6 @@ class GeminiService {
   constructor() {
     this.genAI = new GoogleGenerativeAI(config.gemini.apiKey);
     this.model = this.genAI.getGenerativeModel({ model: config.gemini.model });
-    this.fileManager = new GoogleAIFileManager(config.gemini.apiKey);
     this.semaphore = new Semaphore(MAX_CONCURRENT);
   }
 
@@ -112,35 +107,17 @@ class GeminiService {
   async _doAnalyzeCall(audioBuffer, criteria, mimeType = 'audio/ogg', digitacion = null) {
     const prompt = this._buildPrompt(criteria, digitacion);
     const sizeKB = (audioBuffer.length / 1024).toFixed(0);
-    logger.info(`Subiendo audio a Gemini File API (${sizeKB} KB) para ${criteria.label}`);
+    logger.info(`Enviando audio inline a Gemini (${sizeKB} KB) para ${criteria.label}`);
 
-    const ext = mimeType === 'audio/ogg' ? 'ogg' : 'wav';
-    const tmpPath = path.join(os.tmpdir(), `vxpro_${Date.now()}_${Math.random().toString(36).slice(2, 6)}.${ext}`);
-    let uploadedFileName = null;
-    try {
-      fs.writeFileSync(tmpPath, audioBuffer);
-      const uploadResponse = await this.fileManager.uploadFile(tmpPath, {
-        mimeType,
-        displayName: `voxpro_audio_${Date.now()}`,
-      });
-      uploadedFileName = uploadResponse.file.name;
-      const fileUri = uploadResponse.file.uri;
-      logger.info(`Audio subido: ${uploadedFileName}`);
-
-      return await this._retryWithFallback(fileUri, mimeType, prompt, criteria);
-    } finally {
-      try { fs.unlinkSync(tmpPath); } catch {}
-      if (uploadedFileName) {
-        this.fileManager.deleteFile(uploadedFileName).catch(() => {});
-      }
-    }
+    const audioBase64 = audioBuffer.toString('base64');
+    return await this._retryWithFallback(audioBase64, mimeType, prompt, criteria);
   }
 
   /**
    * Intenta generateContent con el modelo primario; si falla con 503/429 de forma
    * persistente, reintenta con los modelos de respaldo en FALLBACK_MODELS.
    */
-  async _retryWithFallback(fileUri, mimeType, prompt, criteria) {
+  async _retryWithFallback(audioBase64, mimeType, prompt, criteria) {
     const modelsToTry = [config.gemini.model, ...FALLBACK_MODELS];
 
     for (let i = 0; i < modelsToTry.length; i++) {
@@ -150,7 +127,7 @@ class GeminiService {
       try {
         return await this._retryWithBackoff(async () => {
           const result = await model.generateContent([
-            { fileData: { mimeType, fileUri } },
+            { inlineData: { mimeType, data: audioBase64 } },
             { text: prompt },
           ]);
           const response = result.response.text();
