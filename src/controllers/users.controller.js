@@ -6,6 +6,7 @@ const VALID_ROLES = [
   'coordinator',
   'formador',
   'supervisor_calidad',
+  'viewer_zoom',
   'gestor_usuarios',
   'coordinador_avaya',
 ];

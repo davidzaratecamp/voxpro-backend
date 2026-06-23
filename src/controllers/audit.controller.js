@@ -36,7 +36,8 @@ async function checkAccess(selection, req) {
   if (!authorized) {
     return { status: 403, body: { error: true, message: 'Acceso no autorizado' } };
   }
-  if (req.user.role !== 'supervisor_calidad' && selection.auditor_id !== null && selection.auditor_id !== req.user.id) {
+  const isSupervisor = req.user.role === 'supervisor_calidad' || req.user.role === 'viewer_zoom';
+  if (!isSupervisor && selection.auditor_id !== null && selection.auditor_id !== req.user.id) {
     return { status: 403, body: { error: true, message: 'Acceso no autorizado' } };
   }
   return null;
@@ -106,7 +107,7 @@ exports.selectOne = asyncHandler(async (req, res) => {
 exports.list = asyncHandler(async (req, res) => {
   const { week_start, client, status, date, campaign } = req.query;
   const { client_codes: clientCodes, id: userId, role } = req.user;
-  const filterUserId = role === 'supervisor_calidad' ? null : userId;
+  const filterUserId = (role === 'supervisor_calidad' || role === 'viewer_zoom') ? null : userId;
 
   let selections = await AuditService.getWeekSelections(
     week_start || null,
@@ -168,7 +169,7 @@ exports.agentAudits = asyncHandler(async (req, res) => {
     return res.status(400).json({ error: true, message: 'Parámetro client requerido' });
   }
 
-  const filterUserId = role === 'supervisor_calidad' ? null : userId;
+  const filterUserId = (role === 'supervisor_calidad' || role === 'viewer_zoom') ? null : userId;
   const audits = await AuditService.getAgentAudits(agentId, client, { clientCodes, userId: filterUserId });
   res.json({ data: audits, count: audits.length });
 });
@@ -177,7 +178,7 @@ exports.agentsPerformance = asyncHandler(async (req, res) => {
   const { client } = req.query;
   const { client_codes: clientCodes, id: userId, role } = req.user;
   // El supervisor ve todos los agentes de todos los auditores; el coordinador solo los suyos
-  const filterUserId = role === 'supervisor_calidad' ? null : userId;
+  const filterUserId = (role === 'supervisor_calidad' || role === 'viewer_zoom') ? null : userId;
   const agents = await AuditService.agentsPerformance({ client, clientCodes, userId: filterUserId });
   res.json({ data: agents, count: agents.length });
 });
@@ -324,7 +325,7 @@ exports.streamAudio = asyncHandler(async (req, res) => {
 
 exports.summary = asyncHandler(async (req, res) => {
   const { client_codes: clientCodes, id: userId, role } = req.user;
-  const filterUserId = role === 'supervisor_calidad' ? null : userId;
+  const filterUserId = (role === 'supervisor_calidad' || role === 'viewer_zoom') ? null : userId;
   const result = await AuditService.summary(clientCodes, filterUserId);
   res.json({ data: result });
 });

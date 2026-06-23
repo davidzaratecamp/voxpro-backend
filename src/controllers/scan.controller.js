@@ -123,7 +123,7 @@ exports.weekAgents = asyncHandler(async (req, res) => {
   if (!req.user.zoom_enabled) agentsQuery.where('s.source_type', '!=', 'zoom');
 
   // Filtro por coordinador (solo supervisor_calidad lo puede usar)
-  if (coordinator_id && req.user.role === 'supervisor_calidad') {
+  if (coordinator_id && (req.user.role === 'supervisor_calidad' || req.user.role === 'viewer_zoom')) {
     if (coordinator_id === '__unassigned__') {
       // Agentes sin coordinador: obtener todos los agent_ids asignados y excluirlos
       const allCoords = await db('users')

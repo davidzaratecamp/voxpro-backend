@@ -1,7 +1,7 @@
 const router = require('express').Router();
 const ctrl = require('../controllers/dailyAnalysis.controller');
 
-const ALLOWED_ROLES = new Set(['auditor', 'coordinator', 'supervisor_calidad', 'coordinador_avaya', 'formador']);
+const ALLOWED_ROLES = new Set(['auditor', 'coordinator', 'supervisor_calidad', 'viewer_zoom', 'coordinador_avaya', 'formador']);
 
 router.use((req, res, next) => {
   if (!ALLOWED_ROLES.has(req.user?.role)) {

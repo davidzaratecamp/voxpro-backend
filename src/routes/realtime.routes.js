@@ -6,6 +6,7 @@ const ALLOWED_ROLES = new Set([
   'auditor',
   'coordinator',
   'supervisor_calidad',
+  'viewer_zoom',
   'coordinador_avaya',
   'formador',
 ]);
