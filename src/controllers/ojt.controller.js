@@ -1,8 +1,19 @@
 const db = require('../database/connection');
 const asyncHandler = require('../middleware/asyncHandler');
 
-// Solo formadores y gestores pueden acceder
-function requireFormadorOrGestor(req, res, next) {
+// Formadores, gestores y supervisores de calidad pueden ver OJT
+function requireOjtAccess(req, res, next) {
+  const { role } = req.user;
+  if (role !== 'formador' && role !== 'gestor_usuarios' && role !== 'supervisor_calidad') {
+    return res.status(403).json({ error: true, message: 'Se requiere rol de formador, supervisor de calidad o gestor de usuarios' });
+  }
+  next();
+}
+
+exports.requireOjtAccess = requireOjtAccess;
+
+// Solo formadores y gestores pueden crear/editar agentes OJT (supervisor_calidad es de solo lectura)
+function requireOjtManage(req, res, next) {
   const { role } = req.user;
   if (role !== 'formador' && role !== 'gestor_usuarios') {
     return res.status(403).json({ error: true, message: 'Se requiere rol de formador o gestor de usuarios' });
@@ -10,12 +21,12 @@ function requireFormadorOrGestor(req, res, next) {
   next();
 }
 
-exports.requireFormadorOrGestor = requireFormadorOrGestor;
+exports.requireOjtManage = requireOjtManage;
 
 // GET /api/ojt/agents
-// Formador ve solo sus agentes. Gestor puede ver todos (con ?formador_id=X para filtrar).
+// Formador ve solo sus agentes. Supervisor de calidad ve los de sus client_codes. Gestor puede ver todos (con ?formador_id=X para filtrar).
 exports.list = asyncHandler(async (req, res) => {
-  const { role, id: userId } = req.user;
+  const { role, id: userId, client_codes: userClientCodes } = req.user;
   const { status, formador_id } = req.query;
 
   const query = db('ojt_agents as o')
@@ -37,9 +48,11 @@ exports.list = asyncHandler(async (req, res) => {
     .orderBy('o.status', 'asc')
     .orderBy('o.nombre_completo', 'asc');
 
-  // Formador solo ve sus propios agentes
+  // Formador solo ve sus propios agentes; supervisor de calidad solo ve sus campañas asignadas
   if (role === 'formador') {
     query.where('o.formador_id', userId);
+  } else if (role === 'supervisor_calidad') {
+    query.whereIn('o.client_code', userClientCodes || []);
   } else if (formador_id) {
     query.where('o.formador_id', formador_id);
   }
@@ -74,7 +87,7 @@ exports.list = asyncHandler(async (req, res) => {
 // GET /api/ojt/agents/:id
 exports.getById = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { role, id: userId } = req.user;
+  const { role, id: userId, client_codes: userClientCodes } = req.user;
 
   const agent = await db('ojt_agents as o')
     .join('users as u', 'o.formador_id', 'u.id')
@@ -85,6 +98,10 @@ exports.getById = asyncHandler(async (req, res) => {
   if (!agent) return res.status(404).json({ error: true, message: 'Agente OJT no encontrado' });
 
   if (role === 'formador' && agent.formador_id !== userId) {
+    return res.status(403).json({ error: true, message: 'Sin acceso a este agente' });
+  }
+
+  if (role === 'supervisor_calidad' && !(userClientCodes || []).includes(agent.client_code)) {
     return res.status(403).json({ error: true, message: 'Sin acceso a este agente' });
   }
 
