@@ -9,6 +9,7 @@ const VALID_ROLES = [
   'viewer_zoom',
   'gestor_usuarios',
   'coordinador_avaya',
+  'auditor_ia',
 ];
 
 const VALID_CLIENT_CODES = ['obama', 'claro_wcb', 'claro_hogar', 'claro_tyt', 'lv'];

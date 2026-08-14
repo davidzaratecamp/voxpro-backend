@@ -15,6 +15,7 @@ router.use('/avaya', auth, require('./avaya.routes'));
 router.use('/realtime', auth, require('./realtime.routes'));
 router.use('/hc', auth, require('./hc.routes'));
 router.use('/daily-analysis', auth, require('./dailyAnalysis.routes'));
+router.use('/voicebot', auth, require('./voicebot.routes'));
 
 // Health check
 router.get('/health', (req, res) => {
