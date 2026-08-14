@@ -11,6 +11,7 @@ const { downloadBuffer, downloadBufferViaTunnel } = require('../services/Realtim
 const ZoomAuth = require('../services/ZoomAuthService');
 const db = require('../database/connection');
 const asyncHandler = require('../middleware/asyncHandler');
+const { getActiveOjtCedulas } = require('../utils/agentUtils');
 
 const execFileAsync = promisify(execFile);
 
@@ -105,7 +106,7 @@ exports.selectOne = asyncHandler(async (req, res) => {
 });
 
 exports.list = asyncHandler(async (req, res) => {
-  const { week_start, client, status, date, campaign } = req.query;
+  const { week_start, client, status, date, campaign, only_ojt } = req.query;
   const { client_codes: clientCodes, id: userId, role } = req.user;
   const filterUserId = (role === 'supervisor_calidad' || role === 'viewer_zoom') ? null : userId;
 
@@ -116,6 +117,11 @@ exports.list = asyncHandler(async (req, res) => {
 
   if (campaign) {
     selections = selections.filter((s) => s.campaign_type === campaign);
+  }
+
+  if (only_ojt === 'true') {
+    const ojtCedulas = await getActiveOjtCedulas(clientCodes);
+    selections = selections.filter((s) => ojtCedulas.includes(s.agent_id));
   }
 
   res.json({ data: selections, count: selections.length });

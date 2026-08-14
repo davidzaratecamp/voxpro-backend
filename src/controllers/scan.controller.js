@@ -89,9 +89,9 @@ exports.scanAndSelect = asyncHandler(async (req, res) => {
 });
 
 exports.weekAgents = asyncHandler(async (req, res) => {
-  const { week_start, subcampaign, client, coordinator_id } = req.query;
+  const { week_start, subcampaign, client, coordinator_id, only_ojt } = req.query;
   const clientCodes = req.user.client_codes || [];
-  const agentIds = await resolveAgentIds(req.user.id);
+  const agentIds = await resolveAgentIds(req.user.id, { onlyOjt: only_ojt === 'true' });
 
   // Calcular los 7 días de la semana
   const start = week_start ? new Date(week_start + 'T00:00:00') : (() => {
