@@ -838,6 +838,81 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
 
     return { score, generalResults, highImpactResults, highImpactFailed };
   }
+
+  /**
+   * Califica una llamada del voicebot contra su propio prompt operativo.
+   * A diferencia de analyzeCall, no hay audio que transcribir — la
+   * transcripción ya viene de la fuente (v_voicebot_result).
+   *
+   * @param {string} promptText - Prompt operativo del bot (pegado por el usuario)
+   * @param {Array<{role: string, content: string}>} transcript - Turnos de la conversación
+   * @returns {{ score: number, summary: string, strengths: string, issues: string }}
+   */
+  async analyzeVoicebotCall(promptText, transcript) {
+    await this.semaphore.acquire();
+    try {
+      const prompt = this._buildVoicebotPrompt(promptText, transcript);
+      return await this._retryWithBackoff(async () => {
+        const result = await this.model.generateContent([{ text: prompt }]);
+        return this._parseVoicebotResponse(result.response.text());
+      });
+    } finally {
+      this.semaphore.release();
+    }
+  }
+
+  _buildVoicebotPrompt(promptText, transcript) {
+    const conversacion = (transcript || [])
+      .map((t) => `${t.role === 'agent' ? 'AGENTE IA' : 'CLIENTE'}: ${t.content}`)
+      .join('\n');
+
+    return `Eres un auditor de calidad. Tu tarea es evaluar si un agente de inteligencia artificial (voicebot) siguió correctamente sus propias instrucciones operativas durante una llamada real con un cliente.
+
+INSTRUCCIONES OPERATIVAS DEL AGENTE IA (esta es la matriz de calidad — evalúa el cumplimiento de esto):
+"""
+${promptText}
+"""
+
+TRANSCRIPCIÓN DE LA LLAMADA:
+"""
+${conversacion}
+"""
+
+Evalúa qué tan bien el agente IA cumplió sus instrucciones operativas en esta conversación específica: tono, guion, manejo de objeciones, información entregada, y si transfirió o cerró la llamada como correspondía según sus instrucciones.
+
+Responde ÚNICAMENTE con un JSON válido, sin texto adicional ni marcadores markdown, con esta forma exacta:
+{
+  "score": <número entero de 0 a 100, qué tan bien cumplió sus instrucciones>,
+  "summary": "<resumen breve de la evaluación general>",
+  "strengths": "<qué hizo bien el agente respecto a sus instrucciones>",
+  "issues": "<qué hizo mal o se desvió de sus instrucciones, si aplica>"
+}`;
+  }
+
+  _parseVoicebotResponse(responseText) {
+    let cleaned = responseText.trim();
+    if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
+    if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
+    if (cleaned.endsWith('```')) cleaned = cleaned.slice(0, -3);
+    cleaned = cleaned.trim();
+
+    let parsed;
+    try {
+      parsed = JSON.parse(cleaned);
+    } catch (err) {
+      logger.error('Error parseando respuesta de Gemini (voicebot)', { response: cleaned.slice(0, 500) });
+      throw new Error('La respuesta de Gemini no es JSON válido');
+    }
+
+    const score = Math.max(0, Math.min(100, Math.round(Number(parsed.score) || 0)));
+
+    return {
+      score,
+      summary: parsed.summary || '',
+      strengths: parsed.strengths || '',
+      issues: parsed.issues || '',
+    };
+  }
 }
 
 module.exports = new GeminiService();

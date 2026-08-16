@@ -10,6 +10,8 @@ const { downloadBuffer } = require('./RealtimeScanService');
 
 const execFileAsync = promisify(execFile);
 
+const VALID_PROYECTOS = Object.keys(voicebotSource.proyectos).map(Number);
+
 // GET /api/voicebot/calls
 exports.list = asyncHandler(async (req, res) => {
   const { date_from, date_to, proyecto_id, only_transfer, phone } = req.query;
@@ -58,4 +60,48 @@ exports.streamAudio = asyncHandler(async (req, res) => {
     fs.unlink(tmpInput, () => {});
     fs.unlink(tmpOutput, () => {});
   }
+});
+
+// GET /api/voicebot/calls/:callId/audit
+exports.getCallAudit = asyncHandler(async (req, res) => {
+  const audit = await VoicebotService.getCallAudit(req.params.callId);
+  res.json({ data: audit });
+});
+
+// GET /api/voicebot/prompts
+exports.getPrompts = asyncHandler(async (req, res) => {
+  const prompts = await VoicebotService.getPrompts();
+  res.json({ data: prompts });
+});
+
+// PUT /api/voicebot/prompts/:proyectoId
+exports.savePrompt = asyncHandler(async (req, res) => {
+  const proyectoId = Number(req.params.proyectoId);
+  if (!VALID_PROYECTOS.includes(proyectoId)) {
+    return res.status(400).json({ error: true, message: 'proyecto_id inválido' });
+  }
+  const { prompt_text } = req.body;
+  if (!prompt_text || !prompt_text.trim()) {
+    return res.status(400).json({ error: true, message: 'prompt_text es requerido' });
+  }
+  await VoicebotService.savePrompt(proyectoId, prompt_text.trim(), req.user.id);
+  res.json({ message: 'Prompt guardado' });
+});
+
+// GET /api/voicebot/audit-settings
+exports.getAuditSettings = asyncHandler(async (req, res) => {
+  const settings = await VoicebotService.getAuditSettings();
+  res.json({ data: settings });
+});
+
+// POST /api/voicebot/audit-settings/enable
+exports.enableAutoAudit = asyncHandler(async (req, res) => {
+  const settings = await VoicebotService.setAuditEnabled(true, req.user.id);
+  res.json({ message: 'Auditoría automática activada', data: settings });
+});
+
+// POST /api/voicebot/audit-settings/disable
+exports.disableAutoAudit = asyncHandler(async (req, res) => {
+  const settings = await VoicebotService.setAuditEnabled(false, req.user.id);
+  res.json({ message: 'Auditoría automática desactivada', data: settings });
 });

@@ -3,12 +3,14 @@ const config = require('../config');
 const ScannerService = require('../services/ScannerService');
 const ZoomScannerService = require('../services/ZoomScannerService');
 const AuditService = require('../services/AuditService');
+const VoicebotAuditRunner = require('../services/VoicebotAuditRunner');
 const db = require('../database/connection');
 const logger = require('../utils/logger');
 
 let scanTask = null;
 let zoomTodayTask = null;
 let cleanupTask = null;
+let voicebotAuditTask = null;
 
 function start() {
   const schedule = config.scan.cronSchedule;
@@ -90,6 +92,15 @@ function start() {
     }
   });
 
+  // Job de auditoría IA del voicebot: audita llamadas nuevas de Claro cada 10min
+  voicebotAuditTask = cron.schedule('*/10 * * * *', async () => {
+    try {
+      await VoicebotAuditRunner.runPendingAudits();
+    } catch (err) {
+      logger.error('Job voicebot-audit: error', err);
+    }
+  });
+
   logger.info(`Scheduler iniciado - job diario programado: ${schedule}`);
 }
 
@@ -105,6 +116,10 @@ function stop() {
   if (cleanupTask) {
     cleanupTask.stop();
     cleanupTask = null;
+  }
+  if (voicebotAuditTask) {
+    voicebotAuditTask.stop();
+    voicebotAuditTask = null;
   }
   logger.info('Scheduler detenido');
 }

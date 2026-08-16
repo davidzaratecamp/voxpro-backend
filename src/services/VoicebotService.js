@@ -1,6 +1,7 @@
 const { Client: PGClient } = require('pg');
 const voicebotSource = require('../config/voicebotSource');
 const logger = require('../utils/logger');
+const db = require('../database/connection');
 
 const PROYECTO_IDS = Object.keys(voicebotSource.proyectos).map(Number);
 
@@ -111,6 +112,75 @@ class VoicebotService {
     } finally {
       await pgClient.end().catch(() => {});
     }
+  }
+
+  /**
+   * Llamadas de un proyecto con fecha+hora >= sinceTimestamp, ordenadas de más
+   * antigua a más nueva. Usado por el cron de auditoría automática.
+   */
+  async listCallsSince(proyectoId, sinceTimestamp, limit = 20) {
+    const pgClient = await this._connect();
+    try {
+      const result = await pgClient.query(
+        `SELECT proyecto_id, call_id, fecha, hora, hangup_reason, duracion, telefono, call_analysis
+         FROM v_voicebot_result
+         WHERE proyecto_id = $1 AND (fecha + hora) >= $2::timestamp
+         ORDER BY fecha ASC, hora ASC
+         LIMIT $3`,
+        [proyectoId, sinceTimestamp, limit]
+      );
+      return result.rows.map((r) => this._mapRow(r));
+    } finally {
+      await pgClient.end().catch(() => {});
+    }
+  }
+
+  // ── Prompts (matriz de calidad IA), configuración local en MySQL ──────────
+
+  async getPrompts() {
+    const rows = await db('voicebot_prompts').select('proyecto_id', 'prompt_text', 'updated_at');
+    const map = {};
+    for (const r of rows) map[r.proyecto_id] = { prompt_text: r.prompt_text, updated_at: r.updated_at };
+    return map;
+  }
+
+  async getPrompt(proyectoId) {
+    const row = await db('voicebot_prompts').where('proyecto_id', proyectoId).first();
+    return row?.prompt_text || null;
+  }
+
+  async savePrompt(proyectoId, promptText, userId) {
+    const existing = await db('voicebot_prompts').where('proyecto_id', proyectoId).first();
+    if (existing) {
+      await db('voicebot_prompts').where('proyecto_id', proyectoId)
+        .update({ prompt_text: promptText, updated_by: userId, updated_at: db.fn.now() });
+    } else {
+      await db('voicebot_prompts').insert({ proyecto_id: proyectoId, prompt_text: promptText, updated_by: userId });
+    }
+  }
+
+  // ── Estado del switch de auditoría automática ──────────────────────────────
+
+  async getAuditSettings() {
+    const row = await db('voicebot_audit_settings').where('id', 1).first();
+    return { enabled: !!row?.enabled, enabled_at: row?.enabled_at || null };
+  }
+
+  async setAuditEnabled(enabled, userId) {
+    const updates = { enabled };
+    if (enabled) {
+      updates.enabled_at = db.fn.now();
+      updates.enabled_by = userId;
+    }
+    await db('voicebot_audit_settings').where('id', 1).update(updates);
+    return this.getAuditSettings();
+  }
+
+  // ── Resultados de auditoría IA por llamada ─────────────────────────────────
+
+  async getCallAudit(callId) {
+    const row = await db('voicebot_call_audits').where('call_id', callId).first();
+    return row || null;
   }
 }
 

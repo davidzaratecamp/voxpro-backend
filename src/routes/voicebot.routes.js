@@ -1,9 +1,9 @@
 const router = require('express').Router();
 const ctrl = require('../controllers/voicebot.controller');
 
-// Solo auditor_ia puede acceder
+// Solo auditor_ia o gestor_usuarios pueden acceder
 router.use((req, res, next) => {
-  if (req.user?.role !== 'auditor_ia') {
+  if (!['auditor_ia', 'gestor_usuarios'].includes(req.user?.role)) {
     return res.status(403).json({ error: true, message: 'Acceso restringido a auditores de IA' });
   }
   next();
@@ -12,5 +12,13 @@ router.use((req, res, next) => {
 router.get('/calls', ctrl.list);
 router.get('/calls/:callId', ctrl.getById);
 router.get('/calls/:callId/audio', ctrl.streamAudio);
+router.get('/calls/:callId/audit', ctrl.getCallAudit);
+
+router.get('/prompts', ctrl.getPrompts);
+router.put('/prompts/:proyectoId', ctrl.savePrompt);
+
+router.get('/audit-settings', ctrl.getAuditSettings);
+router.post('/audit-settings/enable', ctrl.enableAutoAudit);
+router.post('/audit-settings/disable', ctrl.disableAutoAudit);
 
 module.exports = router;
