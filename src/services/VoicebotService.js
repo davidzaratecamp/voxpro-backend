@@ -195,6 +195,116 @@ class VoicebotService {
     const row = await db('voicebot_call_audits').where('call_id', callId).first();
     return row || null;
   }
+
+  // ── Estadísticas agregadas para el dashboard de "Análisis gráfico" ────────
+
+  /**
+   * Totales de llamadas y desglose por hangup_reason, por proyecto, en los
+   * últimos `days` días (fuente: v_voicebot_result en Postgres).
+   */
+  async _getCallTotals(days) {
+    const pgClient = await this._connect();
+    try {
+      const since = new Date();
+      since.setDate(since.getDate() - days);
+      const sinceStr = since.toISOString().slice(0, 10);
+
+      const result = await pgClient.query(
+        `SELECT proyecto_id, hangup_reason, COUNT(*) as count
+         FROM v_voicebot_result
+         WHERE proyecto_id = ANY($1::int[]) AND fecha >= $2
+         GROUP BY proyecto_id, hangup_reason`,
+        [PROYECTO_IDS, sinceStr]
+      );
+      return result.rows.map((r) => ({
+        proyecto_id: r.proyecto_id,
+        hangup_reason: r.hangup_reason,
+        count: Number(r.count),
+      }));
+    } finally {
+      await pgClient.end().catch(() => {});
+    }
+  }
+
+  /**
+   * Estadísticas de puntaje (promedio, distribución, tendencia diaria) desde
+   * voicebot_call_audits en MySQL. Se calcula en JS sobre el set ya acotado
+   * a `days` días — nunca son más de unos cientos de filas.
+   */
+  async getStats({ days = 30 } = {}) {
+    const since = new Date();
+    since.setDate(since.getDate() - days);
+
+    const [totalsByReason, audits] = await Promise.all([
+      this._getCallTotals(days),
+      db('voicebot_call_audits')
+        .whereIn('proyecto_id', PROYECTO_IDS)
+        .where('created_at', '>=', since)
+        .select('proyecto_id', 'score', db.raw('DATE(created_at) as audit_date')),
+    ]);
+
+    const byProyecto = {};
+    for (const id of PROYECTO_IDS) {
+      byProyecto[id] = {
+        proyecto_id: id,
+        proyecto_name: voicebotSource.proyectos[id],
+        total_calls: 0,
+        transferred: 0,
+        audited: 0,
+        avg_score: null,
+        low: 0,
+        mid: 0,
+        high: 0,
+      };
+    }
+
+    for (const row of totalsByReason) {
+      const bucket = byProyecto[row.proyecto_id];
+      if (!bucket) continue;
+      bucket.total_calls += row.count;
+      if (row.hangup_reason === 'call_transfer') bucket.transferred += row.count;
+    }
+
+    const scoreSums = {};
+    const trendMap = new Map(); // `${date}::${proyecto_id}` -> { sum, count }
+
+    for (const a of audits) {
+      const bucket = byProyecto[a.proyecto_id];
+      if (bucket) {
+        bucket.audited += 1;
+        scoreSums[a.proyecto_id] = (scoreSums[a.proyecto_id] || 0) + a.score;
+        if (a.score < 60) bucket.low += 1;
+        else if (a.score < 80) bucket.mid += 1;
+        else bucket.high += 1;
+      }
+
+      const dateStr = a.audit_date instanceof Date ? a.audit_date.toISOString().slice(0, 10) : String(a.audit_date).slice(0, 10);
+      const key = `${dateStr}::${a.proyecto_id}`;
+      const entry = trendMap.get(key) || { date: dateStr, proyecto_id: a.proyecto_id, sum: 0, count: 0 };
+      entry.sum += a.score;
+      entry.count += 1;
+      trendMap.set(key, entry);
+    }
+
+    for (const id of PROYECTO_IDS) {
+      const bucket = byProyecto[id];
+      bucket.avg_score = bucket.audited > 0 ? Math.round(scoreSums[id] / bucket.audited) : null;
+    }
+
+    const trend = [...trendMap.values()]
+      .map((t) => ({
+        date: t.date,
+        proyecto_id: t.proyecto_id,
+        avg_score: Math.round(t.sum / t.count),
+        count: t.count,
+      }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+
+    return {
+      by_proyecto: Object.values(byProyecto),
+      trend,
+    };
+  }
 }
 
 module.exports = new VoicebotService();

@@ -62,6 +62,13 @@ exports.streamAudio = asyncHandler(async (req, res) => {
   }
 });
 
+// GET /api/voicebot/stats
+exports.getStats = asyncHandler(async (req, res) => {
+  const days = Math.min(90, Math.max(1, Number(req.query.days) || 30));
+  const stats = await VoicebotService.getStats({ days });
+  res.json({ data: stats });
+});
+
 // GET /api/voicebot/calls/:callId/audit
 exports.getCallAudit = asyncHandler(async (req, res) => {
   const audit = await VoicebotService.getCallAudit(req.params.callId);
