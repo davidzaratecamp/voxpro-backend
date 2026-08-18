@@ -14,8 +14,8 @@ const VALID_PROYECTOS = Object.keys(voicebotSource.proyectos).map(Number);
 
 // GET /api/voicebot/calls
 exports.list = asyncHandler(async (req, res) => {
-  const { date_from, date_to, proyecto_id, only_transfer, phone } = req.query;
-  const data = await VoicebotService.listCalls({ date_from, date_to, proyecto_id, only_transfer, phone });
+  const { date_from, date_to, proyecto_id, only_transfer, phone, missed_transfer } = req.query;
+  const data = await VoicebotService.listCalls({ date_from, date_to, proyecto_id, only_transfer, phone, missed_transfer });
   res.json({ data, count: data.length });
 });
 
