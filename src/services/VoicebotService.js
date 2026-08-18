@@ -36,7 +36,7 @@ class VoicebotService {
    * (12 y 13) y a un rango de fechas (default: últimos 7 días) para no traer
    * de más — la vista ya tiene más de 17k filas y sigue creciendo.
    */
-  async listCalls({ date_from, date_to, proyecto_id, only_transfer, phone } = {}) {
+  async listCalls({ date_from, date_to, proyecto_id, only_transfer, phone, missed_transfer } = {}) {
     const pgClient = await this._connect();
     try {
       const to = date_to || new Date().toISOString().slice(0, 10);
@@ -67,22 +67,37 @@ class VoicebotService {
       );
 
       const calls = result.rows.map((r) => this._mapRow(r));
-      return this._attachScores(calls);
+      const withScores = await this._attachScores(calls);
+
+      if (missed_transfer === 'true' || missed_transfer === true) {
+        return withScores.filter((c) => c.missed_transfer === true);
+      }
+      return withScores;
     } finally {
       await pgClient.end().catch(() => {});
     }
   }
 
   /**
-   * Agrega el puntaje de auditoría IA (si existe) a cada llamada, consultando
-   * la tabla local voicebot_call_audits en un solo query.
+   * Agrega el puntaje de auditoría IA y la señal de "transferencia perdida"
+   * (si existen), consultando la tabla local voicebot_call_audits en un solo query.
    */
   async _attachScores(calls) {
     if (!calls.length) return calls;
     const callIds = calls.map((c) => c.call_id);
-    const audits = await db('voicebot_call_audits').whereIn('call_id', callIds).select('call_id', 'score');
-    const scoreMap = new Map(audits.map((a) => [a.call_id, a.score]));
-    return calls.map((c) => ({ ...c, ai_score: scoreMap.has(c.call_id) ? scoreMap.get(c.call_id) : null }));
+    const audits = await db('voicebot_call_audits')
+      .whereIn('call_id', callIds)
+      .select('call_id', 'score', 'missed_transfer', 'missed_transfer_reason');
+    const auditMap = new Map(audits.map((a) => [a.call_id, a]));
+    return calls.map((c) => {
+      const a = auditMap.get(c.call_id);
+      return {
+        ...c,
+        ai_score: a ? a.score : null,
+        missed_transfer: a ? !!a.missed_transfer : false,
+        missed_transfer_reason: a ? a.missed_transfer_reason : null,
+      };
+    });
   }
 
   /**
@@ -240,7 +255,7 @@ class VoicebotService {
       db('voicebot_call_audits')
         .whereIn('proyecto_id', PROYECTO_IDS)
         .where('created_at', '>=', since)
-        .select('proyecto_id', 'score', db.raw('DATE(created_at) as audit_date')),
+        .select('proyecto_id', 'score', 'missed_transfer', db.raw('DATE(created_at) as audit_date')),
     ]);
 
     const byProyecto = {};
@@ -255,6 +270,7 @@ class VoicebotService {
         low: 0,
         mid: 0,
         high: 0,
+        missed_transfer: 0,
       };
     }
 
@@ -276,6 +292,7 @@ class VoicebotService {
         if (a.score < 60) bucket.low += 1;
         else if (a.score < 80) bucket.mid += 1;
         else bucket.high += 1;
+        if (a.missed_transfer) bucket.missed_transfer += 1;
       }
 
       const dateStr = a.audit_date instanceof Date ? a.audit_date.toISOString().slice(0, 10) : String(a.audit_date).slice(0, 10);

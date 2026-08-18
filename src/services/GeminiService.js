@@ -850,12 +850,13 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
    * @param {string} promptText - Prompt operativo del bot (pegado por el usuario)
    * @param {Array<{role: string, content: string}>} transcript - Turnos de la conversación
    * @param {string} [callSummary] - Resumen que la IA le da al agente humano (call_analysis.call_summary)
-   * @returns {{ score: number, summary: string, strengths: string, issues: string, summaryScore: number|null, summaryIssues: string }}
+   * @param {string} [hangupReason] - Cómo terminó la llamada (call_transfer, user_hangup, agent_hangup, inactivity)
+   * @returns {{ score, summary, strengths, issues, summaryScore, summaryIssues, missedTransfer, missedTransferReason }}
    */
-  async analyzeVoicebotCall(promptText, transcript, callSummary) {
+  async analyzeVoicebotCall(promptText, transcript, callSummary, hangupReason) {
     await this.semaphore.acquire();
     try {
-      const prompt = this._buildVoicebotPrompt(promptText, transcript, callSummary);
+      const prompt = this._buildVoicebotPrompt(promptText, transcript, callSummary, hangupReason);
       return await this._retryWithBackoff(async () => {
         const result = await this.model.generateContent([{ text: prompt }]);
         return this._parseVoicebotResponse(result.response.text(), !!callSummary);
@@ -865,7 +866,7 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
     }
   }
 
-  _buildVoicebotPrompt(promptText, transcript, callSummary) {
+  _buildVoicebotPrompt(promptText, transcript, callSummary, hangupReason) {
     const conversacion = (transcript || [])
       .map((t) => `${t.role === 'agent' ? 'AGENTE IA' : 'CLIENTE'}: ${t.content}`)
       .join('\n');
@@ -880,6 +881,10 @@ ${callSummary}
 Además de lo anterior, evalúa por separado si ese resumen es FIEL y COHERENTE con lo que realmente ocurrió en la conversación — el agente humano depende de ese resumen para no quedar perdido con el cliente. Señala si el resumen omite algo importante que dijo el cliente, si inventa información que no está en la transcripción, o si tergiversa la intención real del cliente.`
       : '';
 
+    const hangupSection = hangupReason
+      ? `\nCómo terminó la llamada (hangup_reason): "${hangupReason}" (call_transfer = se transfirió a un asesor humano; user_hangup = colgó el cliente; agent_hangup = colgó el bot; inactivity = inactividad).`
+      : '';
+
     return `Eres un auditor de calidad. Tu tarea es evaluar si un agente de inteligencia artificial (voicebot) siguió correctamente sus propias instrucciones operativas durante una llamada real con un cliente.
 
 INSTRUCCIONES OPERATIVAS DEL AGENTE IA (esta es la matriz de calidad — evalúa el cumplimiento de esto):
@@ -891,9 +896,12 @@ TRANSCRIPCIÓN DE LA LLAMADA:
 """
 ${conversacion}
 """
+${hangupSection}
 
 Evalúa qué tan bien el agente IA cumplió sus instrucciones operativas en esta conversación específica: tono, guion, manejo de objeciones, información entregada, y si transfirió o cerró la llamada como correspondía según sus instrucciones.
 ${summarySection}
+
+Además, revisa específicamente si el cliente mostró una intención clara de hablar con un asesor humano (lo pidió explícitamente, o expresó un interés de compra/servicio que según las instrucciones del bot ameritaba transferencia), pero la llamada terminó SIN transferirse. Esto es una oportunidad de venta o de atención perdida y debe marcarse como tal, sin importar el motivo formal de cierre de la llamada.
 
 Responde ÚNICAMENTE con un JSON válido, sin texto adicional ni marcadores markdown, con esta forma exacta:
 {
@@ -902,7 +910,9 @@ Responde ÚNICAMENTE con un JSON válido, sin texto adicional ni marcadores mark
   "strengths": "<qué hizo bien el agente respecto a sus instrucciones>",
   "issues": "<qué hizo mal o se desvió de sus instrucciones, si aplica>"${callSummary ? `,
   "summary_score": <número entero de 0 a 100, qué tan fiel y completo es el resumen entregado al agente humano respecto a la conversación real>,
-  "summary_issues": "<qué omite, inventa o tergiversa el resumen respecto a la conversación real; cadena vacía si el resumen es fiel>"` : ''}
+  "summary_issues": "<qué omite, inventa o tergiversa el resumen respecto a la conversación real; cadena vacía si el resumen es fiel>"` : ''},
+  "missed_transfer": <true o false, el cliente mostró intención clara de ser transferido o interés que lo ameritaba, pero la llamada no terminó transferida>,
+  "missed_transfer_reason": "<qué dijo o mostró el cliente que indicaba esa intención; cadena vacía si missed_transfer es false>"
 }`;
   }
 
@@ -933,6 +943,8 @@ Responde ÚNICAMENTE con un JSON válido, sin texto adicional ni marcadores mark
       issues: parsed.issues || '',
       summaryScore,
       summaryIssues: parsed.summary_issues || '',
+      missedTransfer: parsed.missed_transfer === true,
+      missedTransferReason: parsed.missed_transfer_reason || '',
     };
   }
 }

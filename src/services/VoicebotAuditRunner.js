@@ -40,7 +40,7 @@ class VoicebotAuditRunner {
           const detail = await VoicebotService.getCallById(call.call_id);
           if (!detail || !detail.transcript.length) continue;
 
-          const result = await GeminiService.analyzeVoicebotCall(prompt, detail.transcript, detail.call_summary);
+          const result = await GeminiService.analyzeVoicebotCall(prompt, detail.transcript, detail.call_summary, detail.hangup_reason);
 
           await db('voicebot_call_audits').insert({
             call_id: call.call_id,
@@ -51,8 +51,10 @@ class VoicebotAuditRunner {
             issues: result.issues,
             summary_score: result.summaryScore,
             summary_issues: result.summaryIssues,
+            missed_transfer: result.missedTransfer,
+            missed_transfer_reason: result.missedTransferReason,
           });
-          logger.info(`VoicebotAuditRunner: llamada ${call.call_id} auditada (score ${result.score}, resumen ${result.summaryScore})`);
+          logger.info(`VoicebotAuditRunner: llamada ${call.call_id} auditada (score ${result.score}, resumen ${result.summaryScore}, transferencia_perdida ${result.missedTransfer})`);
         } catch (err) {
           logger.error(`VoicebotAuditRunner: falló auditoría de ${call.call_id}`, err);
         }
