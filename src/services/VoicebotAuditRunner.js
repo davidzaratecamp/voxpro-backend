@@ -14,10 +14,10 @@ class VoicebotAuditRunner {
    * la próxima corrida porque sigue "faltando" en voicebot_call_audits.
    */
   async runPendingAudits() {
-    const settings = await VoicebotService.getAuditSettings();
-    if (!settings.enabled || !settings.enabled_at) return;
-
     for (const proyectoId of PROYECTO_IDS) {
+      const settings = await VoicebotService.getAuditSettingsFor(proyectoId);
+      if (!settings.enabled || !settings.enabled_at) continue;
+
       const prompt = await VoicebotService.getPrompt(proyectoId);
       if (!prompt) continue;
 
@@ -58,7 +58,7 @@ class VoicebotAuditRunner {
         } catch (err) {
           if (err.isSpendingCap) {
             logger.error('VoicebotAuditRunner: cuota de Gemini agotada, deteniendo auditoría automática', err);
-            await VoicebotService.autoDisable(
+            await VoicebotService.autoDisableAllEnabled(
               'Se agotó la cuota de tokens de Gemini (IA). La auditoría automática se detuvo sola.'
             );
             return;

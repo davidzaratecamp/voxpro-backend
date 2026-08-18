@@ -15,4 +15,8 @@ module.exports = {
     12: 'Claro Hogar',
     13: 'Claro TyT',
   },
+  clientCodeToProyecto: {
+    claro_hogar: 12,
+    claro_tyt: 13,
+  },
 };

@@ -18,8 +18,8 @@ router.get('/prompts', ctrl.getPrompts);
 router.put('/prompts/:proyectoId', ctrl.savePrompt);
 
 router.get('/audit-settings', ctrl.getAuditSettings);
-router.post('/audit-settings/enable', ctrl.enableAutoAudit);
-router.post('/audit-settings/disable', ctrl.disableAutoAudit);
+router.post('/audit-settings/:proyectoId/enable', ctrl.enableAutoAudit);
+router.post('/audit-settings/:proyectoId/disable', ctrl.disableAutoAudit);
 
 router.get('/stats', ctrl.getStats);
 

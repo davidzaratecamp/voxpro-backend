@@ -47,7 +47,10 @@ class VoicebotService {
       })();
 
       const conditions = ['proyecto_id = ANY($1::int[])', 'fecha BETWEEN $2 AND $3'];
-      const params = [proyecto_id ? [Number(proyecto_id)] : PROYECTO_IDS, from, to];
+      const proyectoFilter = proyecto_id
+        ? (Array.isArray(proyecto_id) ? proyecto_id.map(Number) : [Number(proyecto_id)])
+        : PROYECTO_IDS;
+      const params = [proyectoFilter, from, to];
 
       if (only_transfer === 'true' || only_transfer === true) {
         conditions.push(`hangup_reason = 'call_transfer'`);
@@ -127,16 +130,18 @@ class VoicebotService {
   }
 
   /**
-   * Solo lo necesario para armar la URL de audio (streamAudio en el controlador).
+   * Lo necesario para armar la URL de audio y validar acceso por campaña
+   * (streamAudio en el controlador).
    */
   async getAudioFile(callId) {
     const pgClient = await this._connect();
     try {
       const result = await pgClient.query(
-        `SELECT audiofile FROM v_voicebot_result WHERE call_id = $1 AND proyecto_id = ANY($2::int[]) LIMIT 1`,
+        `SELECT audiofile, proyecto_id FROM v_voicebot_result WHERE call_id = $1 AND proyecto_id = ANY($2::int[]) LIMIT 1`,
         [callId, PROYECTO_IDS]
       );
-      return result.rows[0]?.audiofile || null;
+      const row = result.rows[0];
+      return row ? { audiofile: row.audiofile, proyecto_id: row.proyecto_id } : null;
     } finally {
       await pgClient.end().catch(() => {});
     }
@@ -187,10 +192,9 @@ class VoicebotService {
     }
   }
 
-  // ── Estado del switch de auditoría automática ──────────────────────────────
+  // ── Estado del switch de auditoría automática (uno por campaña) ────────────
 
-  async getAuditSettings() {
-    const row = await db('voicebot_audit_settings').where('id', 1).first();
+  _mapAuditSettingsRow(row) {
     return {
       enabled: !!row?.enabled,
       enabled_at: row?.enabled_at || null,
@@ -199,15 +203,34 @@ class VoicebotService {
   }
 
   /**
-   * Activa/desactiva el switch de auditoría automática.
+   * Mapa { proyecto_id: {enabled, enabled_at, disabled_reason} } — una
+   * entrada por campaña, mismo patrón que getPrompts().
+   */
+  async getAuditSettings() {
+    const rows = await db('voicebot_audit_settings').select('proyecto_id', 'enabled', 'enabled_at', 'disabled_reason');
+    const byId = new Map(rows.map((r) => [r.proyecto_id, r]));
+    const map = {};
+    for (const id of PROYECTO_IDS) {
+      map[id] = this._mapAuditSettingsRow(byId.get(id));
+    }
+    return map;
+  }
+
+  async getAuditSettingsFor(proyectoId) {
+    const row = await db('voicebot_audit_settings').where('proyecto_id', proyectoId).first();
+    return this._mapAuditSettingsRow(row);
+  }
+
+  /**
+   * Activa/desactiva el switch de auditoría automática de una campaña.
    * Idempotente: si ya está activo y se pide activar de nuevo, no reinicia
    * el corte (enabled_at) — evita que varios clicks seguidos "salten" llamadas
    * que quedaron pendientes entre el primer click y el segundo.
    * Cualquier acción manual (activar o desactivar) limpia disabled_reason,
-   * que solo lo escribe el sistema cuando se autodetiene (ver autoDisable).
+   * que solo lo escribe el sistema cuando se autodetiene (ver autoDisableAllEnabled).
    */
-  async setAuditEnabled(enabled, userId) {
-    const current = await this.getAuditSettings();
+  async setAuditEnabled(proyectoId, enabled, userId) {
+    const current = await this.getAuditSettingsFor(proyectoId);
 
     if (enabled && current.enabled) {
       return current;
@@ -218,17 +241,19 @@ class VoicebotService {
       updates.enabled_at = db.fn.now();
       updates.enabled_by = userId;
     }
-    await db('voicebot_audit_settings').where('id', 1).update(updates);
-    return this.getAuditSettings();
+    await db('voicebot_audit_settings').where('proyecto_id', proyectoId).update(updates);
+    return this.getAuditSettingsFor(proyectoId);
   }
 
   /**
-   * El propio cron se autodetiene (ej. se agotó la cuota de Gemini) y deja
-   * registrado el motivo para mostrarlo cuando alguien intente reactivar.
+   * El propio cron se autodetiene (ej. se agotó la cuota de Gemini, que es
+   * de toda la cuenta, no por campaña) — apaga TODAS las campañas que
+   * estén activas en ese momento, para no dejar una encendida pero
+   * atascada en silencio, y deja registrado el motivo para cuando alguien
+   * intente reactivar.
    */
-  async autoDisable(reason) {
-    await db('voicebot_audit_settings').where('id', 1).update({ enabled: false, disabled_reason: reason });
-    return this.getAuditSettings();
+  async autoDisableAllEnabled(reason) {
+    await db('voicebot_audit_settings').where('enabled', true).update({ enabled: false, disabled_reason: reason });
   }
 
   // ── Resultados de auditoría IA por llamada ─────────────────────────────────
@@ -244,7 +269,7 @@ class VoicebotService {
    * Totales de llamadas y desglose por hangup_reason, por proyecto, en los
    * últimos `days` días (fuente: v_voicebot_result en Postgres).
    */
-  async _getCallTotals(days) {
+  async _getCallTotals(days, proyectoIds) {
     const pgClient = await this._connect();
     try {
       const since = new Date();
@@ -256,7 +281,7 @@ class VoicebotService {
          FROM v_voicebot_result
          WHERE proyecto_id = ANY($1::int[]) AND fecha >= $2
          GROUP BY proyecto_id, hangup_reason`,
-        [PROYECTO_IDS, sinceStr]
+        [proyectoIds, sinceStr]
       );
       return result.rows.map((r) => ({
         proyecto_id: r.proyecto_id,
@@ -273,20 +298,21 @@ class VoicebotService {
    * voicebot_call_audits en MySQL. Se calcula en JS sobre el set ya acotado
    * a `days` días — nunca son más de unos cientos de filas.
    */
-  async getStats({ days = 30 } = {}) {
+  async getStats({ days = 30, proyectoIds } = {}) {
+    const ids = proyectoIds && proyectoIds.length ? proyectoIds : PROYECTO_IDS;
     const since = new Date();
     since.setDate(since.getDate() - days);
 
     const [totalsByReason, audits] = await Promise.all([
-      this._getCallTotals(days),
+      this._getCallTotals(days, ids),
       db('voicebot_call_audits')
-        .whereIn('proyecto_id', PROYECTO_IDS)
+        .whereIn('proyecto_id', ids)
         .where('created_at', '>=', since)
         .select('proyecto_id', 'score', 'missed_transfer', db.raw('DATE(created_at) as audit_date')),
     ]);
 
     const byProyecto = {};
-    for (const id of PROYECTO_IDS) {
+    for (const id of ids) {
       byProyecto[id] = {
         proyecto_id: id,
         proyecto_name: voicebotSource.proyectos[id],
@@ -330,7 +356,7 @@ class VoicebotService {
       trendMap.set(key, entry);
     }
 
-    for (const id of PROYECTO_IDS) {
+    for (const id of ids) {
       const bucket = byProyecto[id];
       bucket.avg_score = bucket.audited > 0 ? Math.round(scoreSums[id] / bucket.audited) : null;
     }
