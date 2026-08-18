@@ -92,8 +92,9 @@ function start() {
     }
   });
 
-  // Job de auditoría IA del voicebot: audita llamadas nuevas de Claro cada 10min
-  voicebotAuditTask = cron.schedule('*/10 * * * *', async () => {
+  // Job de auditoría IA del voicebot: audita llamadas nuevas de Claro cada 1min.
+  // El guard de VoicebotAuditRunner evita corridas solapadas si un lote tarda más.
+  voicebotAuditTask = cron.schedule('* * * * *', async () => {
     try {
       await VoicebotAuditRunner.runPendingAudits();
     } catch (err) {

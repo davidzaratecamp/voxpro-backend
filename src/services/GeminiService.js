@@ -77,11 +77,16 @@ async function resolveCampaignKey(clientCode, agentId, proyectoId) {
 // Si el primario falla con 503/429, se intenta el siguiente.
 const FALLBACK_MODELS = ['gemini-3-flash-preview', 'gemini-3.1-flash-lite-preview'];
 
+// Concurrencia propia para el voicebot — separada de MAX_CONCURRENT (auditorías
+// humanas) para poder sostener 100-140 llamadas/hora sin afectar ese flujo.
+const VOICEBOT_MAX_CONCURRENT = 6;
+
 class GeminiService {
   constructor() {
     this.genAI = new GoogleGenerativeAI(config.gemini.apiKey);
     this.model = this.genAI.getGenerativeModel({ model: config.gemini.model });
     this.semaphore = new Semaphore(MAX_CONCURRENT);
+    this.voicebotSemaphore = new Semaphore(VOICEBOT_MAX_CONCURRENT);
   }
 
   /**
@@ -854,7 +859,7 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
    * @returns {{ score, summary, strengths, issues, summaryScore, summaryIssues, missedTransfer, missedTransferReason }}
    */
   async analyzeVoicebotCall(promptText, transcript, callSummary, hangupReason) {
-    await this.semaphore.acquire();
+    await this.voicebotSemaphore.acquire();
     try {
       const prompt = this._buildVoicebotPrompt(promptText, transcript, callSummary, hangupReason);
       return await this._retryWithBackoff(async () => {
@@ -862,7 +867,7 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
         return this._parseVoicebotResponse(result.response.text(), !!callSummary);
       });
     } finally {
-      this.semaphore.release();
+      this.voicebotSemaphore.release();
     }
   }
 

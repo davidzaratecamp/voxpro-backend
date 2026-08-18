@@ -149,9 +149,13 @@ class VoicebotService {
 
   /**
    * Llamadas de un proyecto con fecha+hora >= sinceTimestamp, ordenadas de más
-   * antigua a más nueva. Usado por el cron de auditoría automática.
+   * antigua a más nueva. Usado por el cron de auditoría automática — `limit`
+   * es la ventana cruda que se trae de la fuente (antes de filtrar cuáles ya
+   * se auditaron), no cuántas se procesan; debe ser generosa para que el
+   * runner siempre pueda encontrar trabajo pendiente más allá del bloque
+   * más viejo (que normalmente ya está auditado).
    */
-  async listCallsSince(proyectoId, sinceTimestamp, limit = 20) {
+  async listCallsSince(proyectoId, sinceTimestamp, limit = 300) {
     const pgClient = await this._connect();
     try {
       const result = await pgClient.query(
