@@ -56,6 +56,13 @@ class VoicebotAuditRunner {
           });
           logger.info(`VoicebotAuditRunner: llamada ${call.call_id} auditada (score ${result.score}, resumen ${result.summaryScore}, transferencia_perdida ${result.missedTransfer})`);
         } catch (err) {
+          if (err.isSpendingCap) {
+            logger.error('VoicebotAuditRunner: cuota de Gemini agotada, deteniendo auditoría automática', err);
+            await VoicebotService.autoDisable(
+              'Se agotó la cuota de tokens de Gemini (IA). La auditoría automática se detuvo sola.'
+            );
+            return;
+          }
           logger.error(`VoicebotAuditRunner: falló auditoría de ${call.call_id}`, err);
         }
       }

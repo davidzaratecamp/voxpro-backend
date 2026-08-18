@@ -191,16 +191,43 @@ class VoicebotService {
 
   async getAuditSettings() {
     const row = await db('voicebot_audit_settings').where('id', 1).first();
-    return { enabled: !!row?.enabled, enabled_at: row?.enabled_at || null };
+    return {
+      enabled: !!row?.enabled,
+      enabled_at: row?.enabled_at || null,
+      disabled_reason: row?.disabled_reason || null,
+    };
   }
 
+  /**
+   * Activa/desactiva el switch de auditoría automática.
+   * Idempotente: si ya está activo y se pide activar de nuevo, no reinicia
+   * el corte (enabled_at) — evita que varios clicks seguidos "salten" llamadas
+   * que quedaron pendientes entre el primer click y el segundo.
+   * Cualquier acción manual (activar o desactivar) limpia disabled_reason,
+   * que solo lo escribe el sistema cuando se autodetiene (ver autoDisable).
+   */
   async setAuditEnabled(enabled, userId) {
-    const updates = { enabled };
+    const current = await this.getAuditSettings();
+
+    if (enabled && current.enabled) {
+      return current;
+    }
+
+    const updates = { enabled, disabled_reason: null };
     if (enabled) {
       updates.enabled_at = db.fn.now();
       updates.enabled_by = userId;
     }
     await db('voicebot_audit_settings').where('id', 1).update(updates);
+    return this.getAuditSettings();
+  }
+
+  /**
+   * El propio cron se autodetiene (ej. se agotó la cuota de Gemini) y deja
+   * registrado el motivo para mostrarlo cuando alguien intente reactivar.
+   */
+  async autoDisable(reason) {
+    await db('voicebot_audit_settings').where('id', 1).update({ enabled: false, disabled_reason: reason });
     return this.getAuditSettings();
   }
 
