@@ -840,31 +840,45 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
   }
 
   /**
-   * Califica una llamada del voicebot contra su propio prompt operativo.
+   * Califica una llamada del voicebot contra su propio prompt operativo, y
+   * por separado, qué tan coherente es el resumen que la IA le entrega al
+   * agente humano al transferir la llamada (contexto de la conversación
+   * real vs. lo que el resumen dice que pasó).
    * A diferencia de analyzeCall, no hay audio que transcribir — la
    * transcripción ya viene de la fuente (v_voicebot_result).
    *
    * @param {string} promptText - Prompt operativo del bot (pegado por el usuario)
    * @param {Array<{role: string, content: string}>} transcript - Turnos de la conversación
-   * @returns {{ score: number, summary: string, strengths: string, issues: string }}
+   * @param {string} [callSummary] - Resumen que la IA le da al agente humano (call_analysis.call_summary)
+   * @returns {{ score: number, summary: string, strengths: string, issues: string, summaryScore: number|null, summaryIssues: string }}
    */
-  async analyzeVoicebotCall(promptText, transcript) {
+  async analyzeVoicebotCall(promptText, transcript, callSummary) {
     await this.semaphore.acquire();
     try {
-      const prompt = this._buildVoicebotPrompt(promptText, transcript);
+      const prompt = this._buildVoicebotPrompt(promptText, transcript, callSummary);
       return await this._retryWithBackoff(async () => {
         const result = await this.model.generateContent([{ text: prompt }]);
-        return this._parseVoicebotResponse(result.response.text());
+        return this._parseVoicebotResponse(result.response.text(), !!callSummary);
       });
     } finally {
       this.semaphore.release();
     }
   }
 
-  _buildVoicebotPrompt(promptText, transcript) {
+  _buildVoicebotPrompt(promptText, transcript, callSummary) {
     const conversacion = (transcript || [])
       .map((t) => `${t.role === 'agent' ? 'AGENTE IA' : 'CLIENTE'}: ${t.content}`)
       .join('\n');
+
+    const summarySection = callSummary
+      ? `
+RESUMEN QUE LA IA LE ENTREGA AL AGENTE HUMANO AL TRANSFERIR LA LLAMADA:
+"""
+${callSummary}
+"""
+
+Además de lo anterior, evalúa por separado si ese resumen es FIEL y COHERENTE con lo que realmente ocurrió en la conversación — el agente humano depende de ese resumen para no quedar perdido con el cliente. Señala si el resumen omite algo importante que dijo el cliente, si inventa información que no está en la transcripción, o si tergiversa la intención real del cliente.`
+      : '';
 
     return `Eres un auditor de calidad. Tu tarea es evaluar si un agente de inteligencia artificial (voicebot) siguió correctamente sus propias instrucciones operativas durante una llamada real con un cliente.
 
@@ -879,17 +893,20 @@ ${conversacion}
 """
 
 Evalúa qué tan bien el agente IA cumplió sus instrucciones operativas en esta conversación específica: tono, guion, manejo de objeciones, información entregada, y si transfirió o cerró la llamada como correspondía según sus instrucciones.
+${summarySection}
 
 Responde ÚNICAMENTE con un JSON válido, sin texto adicional ni marcadores markdown, con esta forma exacta:
 {
   "score": <número entero de 0 a 100, qué tan bien cumplió sus instrucciones>,
   "summary": "<resumen breve de la evaluación general>",
   "strengths": "<qué hizo bien el agente respecto a sus instrucciones>",
-  "issues": "<qué hizo mal o se desvió de sus instrucciones, si aplica>"
+  "issues": "<qué hizo mal o se desvió de sus instrucciones, si aplica>"${callSummary ? `,
+  "summary_score": <número entero de 0 a 100, qué tan fiel y completo es el resumen entregado al agente humano respecto a la conversación real>,
+  "summary_issues": "<qué omite, inventa o tergiversa el resumen respecto a la conversación real; cadena vacía si el resumen es fiel>"` : ''}
 }`;
   }
 
-  _parseVoicebotResponse(responseText) {
+  _parseVoicebotResponse(responseText, expectSummaryScore = false) {
     let cleaned = responseText.trim();
     if (cleaned.startsWith('```json')) cleaned = cleaned.slice(7);
     if (cleaned.startsWith('```')) cleaned = cleaned.slice(3);
@@ -905,12 +922,17 @@ Responde ÚNICAMENTE con un JSON válido, sin texto adicional ni marcadores mark
     }
 
     const score = Math.max(0, Math.min(100, Math.round(Number(parsed.score) || 0)));
+    const summaryScore = expectSummaryScore && parsed.summary_score != null
+      ? Math.max(0, Math.min(100, Math.round(Number(parsed.summary_score) || 0)))
+      : null;
 
     return {
       score,
       summary: parsed.summary || '',
       strengths: parsed.strengths || '',
       issues: parsed.issues || '',
+      summaryScore,
+      summaryIssues: parsed.summary_issues || '',
     };
   }
 }
