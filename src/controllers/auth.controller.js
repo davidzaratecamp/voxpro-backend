@@ -26,7 +26,7 @@ exports.login = asyncHandler(async (req, res) => {
 exports.me = asyncHandler(async (req, res) => {
   const user = await db('users')
     .where({ id: req.user.id, active: true })
-    .select('id', 'username', 'name', 'role', 'client_codes')
+    .select('id', 'username', 'name', 'role', 'client_codes', 'voicebot_read_only')
     .first();
 
   if (!user) {

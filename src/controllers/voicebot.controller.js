@@ -26,6 +26,15 @@ function assertProyectoAccess(req, proyectoId) {
   }
 }
 
+/** Lanza 403 si el usuario es de solo lectura (no puede editar prompts ni el switch). */
+function assertCanManage(req) {
+  if (req.user?.voicebot_read_only) {
+    const err = new Error('Tu usuario es de solo lectura en Auditoría IA');
+    err.statusCode = 403;
+    throw err;
+  }
+}
+
 // GET /api/voicebot/calls
 exports.list = asyncHandler(async (req, res) => {
   const { date_from, date_to, proyecto_id, only_transfer, phone, missed_transfer } = req.query;
@@ -123,6 +132,7 @@ exports.savePrompt = asyncHandler(async (req, res) => {
     return res.status(400).json({ error: true, message: 'proyecto_id inválido' });
   }
   assertProyectoAccess(req, proyectoId);
+  assertCanManage(req);
   const { prompt_text } = req.body;
   if (!prompt_text || !prompt_text.trim()) {
     return res.status(400).json({ error: true, message: 'prompt_text es requerido' });
@@ -148,6 +158,7 @@ exports.enableAutoAudit = asyncHandler(async (req, res) => {
     return res.status(400).json({ error: true, message: 'proyecto_id inválido' });
   }
   assertProyectoAccess(req, proyectoId);
+  assertCanManage(req);
   const settings = await VoicebotService.setAuditEnabled(proyectoId, true, req.user.id);
   res.json({ message: 'Auditoría automática activada', data: settings });
 });
@@ -159,6 +170,7 @@ exports.disableAutoAudit = asyncHandler(async (req, res) => {
     return res.status(400).json({ error: true, message: 'proyecto_id inválido' });
   }
   assertProyectoAccess(req, proyectoId);
+  assertCanManage(req);
   const settings = await VoicebotService.setAuditEnabled(proyectoId, false, req.user.id);
   res.json({ message: 'Auditoría automática desactivada', data: settings });
 });

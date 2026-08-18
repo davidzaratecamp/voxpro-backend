@@ -17,6 +17,7 @@ const auth = (req, res, next) => {
       role: payload.role,
       client_codes: payload.client_codes,
       zoom_enabled: Array.isArray(payload.client_codes) ? (payload.client_codes.includes('obama') || payload.client_codes.includes('lv')) : false,
+      voicebot_read_only: !!payload.voicebot_read_only,
     };
     next();
   } catch (err) {
