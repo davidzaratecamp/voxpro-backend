@@ -66,10 +66,23 @@ class VoicebotService {
         params
       );
 
-      return result.rows.map((r) => this._mapRow(r));
+      const calls = result.rows.map((r) => this._mapRow(r));
+      return this._attachScores(calls);
     } finally {
       await pgClient.end().catch(() => {});
     }
+  }
+
+  /**
+   * Agrega el puntaje de auditoría IA (si existe) a cada llamada, consultando
+   * la tabla local voicebot_call_audits en un solo query.
+   */
+  async _attachScores(calls) {
+    if (!calls.length) return calls;
+    const callIds = calls.map((c) => c.call_id);
+    const audits = await db('voicebot_call_audits').whereIn('call_id', callIds).select('call_id', 'score');
+    const scoreMap = new Map(audits.map((a) => [a.call_id, a.score]));
+    return calls.map((c) => ({ ...c, ai_score: scoreMap.has(c.call_id) ? scoreMap.get(c.call_id) : null }));
   }
 
   /**
