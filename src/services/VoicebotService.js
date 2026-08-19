@@ -149,13 +149,11 @@ class VoicebotService {
 
   /**
    * Llamadas de un proyecto con fecha+hora >= sinceTimestamp, ordenadas de más
-   * antigua a más nueva. Usado por el cron de auditoría automática — `limit`
-   * es la ventana cruda que se trae de la fuente (antes de filtrar cuáles ya
-   * se auditaron), no cuántas se procesan; debe ser generosa para que el
-   * runner siempre pueda encontrar trabajo pendiente más allá del bloque
-   * más viejo (que normalmente ya está auditado).
+   * antigua a más nueva. Usado por VoicebotAuditRunner, que trata `sinceTimestamp`
+   * como un cursor que avanza en cada corrida (no siempre el mismo enabled_at) —
+   * así este bloque siempre es "lo siguiente que falta ver", no una ventana fija.
    */
-  async listCallsSince(proyectoId, sinceTimestamp, limit = 300) {
+  async listCallsSince(proyectoId, sinceTimestamp, limit = 40) {
     const pgClient = await this._connect();
     try {
       const result = await pgClient.query(
@@ -203,15 +201,16 @@ class VoicebotService {
       enabled: !!row?.enabled,
       enabled_at: row?.enabled_at || null,
       disabled_reason: row?.disabled_reason || null,
+      last_scanned_at: row?.last_scanned_at || null,
     };
   }
 
   /**
-   * Mapa { proyecto_id: {enabled, enabled_at, disabled_reason} } — una
-   * entrada por campaña, mismo patrón que getPrompts().
+   * Mapa { proyecto_id: {enabled, enabled_at, disabled_reason, last_scanned_at} }
+   * — una entrada por campaña, mismo patrón que getPrompts().
    */
   async getAuditSettings() {
-    const rows = await db('voicebot_audit_settings').select('proyecto_id', 'enabled', 'enabled_at', 'disabled_reason');
+    const rows = await db('voicebot_audit_settings').select('proyecto_id', 'enabled', 'enabled_at', 'disabled_reason', 'last_scanned_at');
     const byId = new Map(rows.map((r) => [r.proyecto_id, r]));
     const map = {};
     for (const id of PROYECTO_IDS) {
@@ -232,6 +231,9 @@ class VoicebotService {
    * que quedaron pendientes entre el primer click y el segundo.
    * Cualquier acción manual (activar o desactivar) limpia disabled_reason,
    * que solo lo escribe el sistema cuando se autodetiene (ver autoDisableAllEnabled).
+   * Al activar (de verdad, no en el caso idempotente de arriba) se reinicia
+   * last_scanned_at para que el cursor de avance arranque limpio desde
+   * enabled_at.
    */
   async setAuditEnabled(proyectoId, enabled, userId) {
     const current = await this.getAuditSettingsFor(proyectoId);
@@ -244,9 +246,20 @@ class VoicebotService {
     if (enabled) {
       updates.enabled_at = db.fn.now();
       updates.enabled_by = userId;
+      updates.last_scanned_at = null;
     }
     await db('voicebot_audit_settings').where('proyecto_id', proyectoId).update(updates);
     return this.getAuditSettingsFor(proyectoId);
+  }
+
+  /**
+   * Avanza el cursor de avance del runner tras revisar un bloque de llamadas
+   * — sin importar si terminaron auditadas o ya lo estaban, para que la
+   * próxima corrida siempre pida el SIGUIENTE tramo de la fuente en vez de
+   * repetir el mismo bloque para siempre.
+   */
+  async advanceScanCursor(proyectoId, timestamp) {
+    await db('voicebot_audit_settings').where('proyecto_id', proyectoId).update({ last_scanned_at: timestamp });
   }
 
   /**
