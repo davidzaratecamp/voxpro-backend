@@ -161,3 +161,10 @@ exports.saveScore = asyncHandler(async (req, res) => {
   const result = await SofiaHumanService.saveScore(Number(req.params.id), { criteria, notes });
   res.json({ message: 'Calificación guardada', data: result });
 });
+
+// POST /api/sofia-human/selections/:id/analyze
+exports.analyze = asyncHandler(async (req, res) => {
+  await loadSelectionWithAccess(req);
+  const result = await SofiaHumanService.analyzeSelection(Number(req.params.id));
+  res.json({ message: 'Análisis completado', data: result });
+});

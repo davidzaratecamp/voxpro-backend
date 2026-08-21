@@ -1,9 +1,18 @@
+const { execFile } = require('child_process');
+const { promisify } = require('util');
+const os = require('os');
+const fs = require('fs');
+const path = require('path');
 const { Client: PGClient } = require('pg');
 const voicebotSource = require('../config/voicebotSource');
 const { CRITERIA } = require('../config/evaluationCriteria');
 const logger = require('../utils/logger');
 const db = require('../database/connection');
 const AuditService = require('./AuditService');
+const GeminiService = require('./GeminiService');
+const { downloadBuffer } = require('../controllers/RealtimeScanService');
+
+const execFileAsync = promisify(execFile);
 
 const HUMAN_PROYECTO_IDS = Object.keys(voicebotSource.humanProyectos).map(Number);
 
@@ -297,6 +306,80 @@ class SofiaHumanService {
       });
 
     return { score, highImpactFailed };
+  }
+
+  /**
+   * Audita automáticamente con IA — mismo motor que "Auditorías" estándar
+   * (GeminiService.analyzeCall contra la misma CRITERIA[client_code]), solo
+   * que el audio se descarga de la fuente del bot en vez de Aware/Kraken.
+   */
+  async analyzeSelection(id) {
+    const selection = await this.getSelectionById(id);
+    if (!selection) {
+      const err = new Error('Selección no encontrada');
+      err.statusCode = 404;
+      throw err;
+    }
+    if (!selection.audiofile) {
+      const err = new Error('Esta llamada no tiene audio disponible');
+      err.statusCode = 404;
+      throw err;
+    }
+
+    const t0 = Date.now();
+    const rawBuffer = await downloadBuffer(this.getAudioUrl(selection.audiofile));
+    logger.info(`SofiaHumanService: audio descargado (${(rawBuffer.length / 1024).toFixed(0)} KB) en ${Date.now() - t0}ms`);
+
+    // Convertir a opus 16kHz mono ~32kbps — igual que AnalysisService, evita
+    // timeouts/truncamiento en Gemini con el WAV crudo.
+    const tmpInput = path.join(os.tmpdir(), `sofia_ai_in_${Date.now()}.wav`);
+    const tmpOutput = path.join(os.tmpdir(), `sofia_ai_out_${Date.now()}.ogg`);
+    let audioBuffer;
+    try {
+      fs.writeFileSync(tmpInput, rawBuffer);
+      await execFileAsync('ffmpeg', [
+        '-y', '-i', tmpInput,
+        '-acodec', 'libopus',
+        '-ar', '16000',
+        '-ac', '1',
+        '-b:a', '32k',
+        tmpOutput,
+      ]);
+      audioBuffer = fs.readFileSync(tmpOutput);
+    } finally {
+      try { fs.unlinkSync(tmpInput); } catch {}
+      try { fs.unlinkSync(tmpOutput); } catch {}
+    }
+
+    const { transcription, evaluation } = await GeminiService.analyzeCall(
+      audioBuffer,
+      selection.client_code,
+      selection.agente_id,
+      selection.proyecto_id,
+      'audio/ogg',
+      null
+    );
+
+    await db('sofia_human_selections')
+      .where({ id })
+      .update({
+        criteria_general: JSON.stringify(evaluation.general),
+        criteria_high_impact: JSON.stringify(evaluation.highImpact),
+        high_impact_failed: evaluation.highImpactFailed,
+        score: evaluation.score,
+        notes: evaluation.summary || null,
+        transcription: transcription || null,
+        status: 'completed',
+        scored_at: db.fn.now(),
+        updated_at: db.fn.now(),
+      });
+
+    logger.info(`SofiaHumanService: análisis IA completado para selección ${id}`, {
+      score: evaluation.score,
+      highImpactFailed: evaluation.highImpactFailed,
+    });
+
+    return { score: evaluation.score, highImpactFailed: evaluation.highImpactFailed, summary: evaluation.summary };
   }
 }
 

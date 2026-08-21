@@ -17,6 +17,7 @@ router.get('/selections/:id', ctrl.getById);
 router.patch('/selections/:id', ctrl.update);
 router.get('/selections/:id/audio', ctrl.streamAudio);
 router.post('/selections/:id/score', ctrl.saveScore);
+router.post('/selections/:id/analyze', ctrl.analyze);
 
 router.get('/criteria/:clientCode', ctrl.getCriteriaTemplate);
 
