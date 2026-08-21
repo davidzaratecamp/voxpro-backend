@@ -59,6 +59,23 @@ exports.list = asyncHandler(async (req, res) => {
   res.json({ data, count: data.length });
 });
 
+// GET /api/sofia-human/selections?status=&date_from=&date_to=&agente=&client_code=
+exports.listSelections = asyncHandler(async (req, res) => {
+  const { status, date_from, date_to, agente, client_code } = req.query;
+  const allowed = resolveAllowedClientCodes(req.user);
+
+  let clientCodes;
+  if (client_code) {
+    assertClientAccess(req, client_code);
+    clientCodes = [client_code];
+  } else {
+    clientCodes = allowed === null ? CLIENT_CODES : allowed;
+  }
+
+  const data = await SofiaHumanService.listSelections({ clientCodes, status, dateFrom: date_from, dateTo: date_to, agente });
+  res.json({ data, count: data.length });
+});
+
 // POST /api/sofia-human/select { registro_llamada_id, proyecto_id }
 exports.select = asyncHandler(async (req, res) => {
   const proyectoId = Number(req.body.proyecto_id);

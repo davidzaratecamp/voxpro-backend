@@ -11,6 +11,7 @@ router.use((req, res, next) => {
 
 router.get('/calls', ctrl.list);
 router.post('/select', ctrl.select);
+router.get('/selections', ctrl.listSelections);
 
 router.get('/selections/:id', ctrl.getById);
 router.patch('/selections/:id', ctrl.update);

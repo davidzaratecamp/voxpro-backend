@@ -203,6 +203,32 @@ class SofiaHumanService {
     return db('sofia_human_selections').where({ id }).first();
   }
 
+  /**
+   * Historial de auditorías de Sofia IA ya seleccionadas/calificadas —
+   * equivalente a AuditService.getWeekSelections, pero sin acotar a una
+   * semana puntual (el volumen de este universo es mucho menor). Es la
+   * forma de ver lo ya auditado sin depender de volver al día exacto de
+   * la llamada original.
+   */
+  async listSelections({ clientCodes, status, dateFrom, dateTo, agente }) {
+    const query = db('sofia_human_selections')
+      .whereIn('client_code', clientCodes)
+      .orderBy('fecha', 'desc')
+      .orderBy('hora', 'desc')
+      .limit(300);
+
+    if (status) query.where('status', status);
+    if (dateFrom) query.where('fecha', '>=', dateFrom);
+    if (dateTo) query.where('fecha', '<=', dateTo);
+    if (agente) {
+      query.where((qb) => {
+        qb.where('agente_id', 'like', `%${agente}%`).orWhere('agente_nombre', 'like', `%${agente}%`);
+      });
+    }
+
+    return query;
+  }
+
   async updateStatus(id, { status, notes }) {
     const update = { updated_at: db.fn.now() };
     if (status !== undefined) update.status = status;
