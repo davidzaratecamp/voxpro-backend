@@ -30,7 +30,7 @@ class SofiaHumanService {
       hora: row.registro_llamada_hora,
       telefono: row.registro_llamada_fono,
       agente_id: row.agente_id,
-      duracion: row.call_time,
+      duracion: row.time_speaking,
       audiofile: row.audiofile,
     };
   }
@@ -53,9 +53,9 @@ class SofiaHumanService {
     try {
       const result = await pgClient.query(
         `SELECT registro_llamada_id, proyecto_id, registro_llamada_fecha, registro_llamada_hora,
-                registro_llamada_fono, agente_id, call_time, audiofile
+                registro_llamada_fono, agente_id, time_speaking, audiofile
          FROM registro_llamada
-         WHERE proyecto_id = ANY($1::int[]) AND registro_llamada_fecha = $2 AND call_time > 0
+         WHERE proyecto_id = ANY($1::int[]) AND registro_llamada_fecha = $2 AND time_speaking > 0
          ORDER BY registro_llamada_hora DESC
          LIMIT 500`,
         [proyectoIds, targetDate]
@@ -113,7 +113,7 @@ class SofiaHumanService {
     try {
       const result = await pgClient.query(
         `SELECT registro_llamada_id, proyecto_id, registro_llamada_fecha, registro_llamada_hora,
-                registro_llamada_fono, agente_id, call_time, audiofile
+                registro_llamada_fono, agente_id, time_speaking, audiofile
          FROM registro_llamada
          WHERE registro_llamada_id = $1 AND proyecto_id = $2
          LIMIT 1`,
