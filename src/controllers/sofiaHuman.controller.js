@@ -42,9 +42,9 @@ async function loadSelectionWithAccess(req) {
   return selection;
 }
 
-// GET /api/sofia-human/calls?date=&client_code=
+// GET /api/sofia-human/calls?date=&client_code=&telefono=
 exports.list = asyncHandler(async (req, res) => {
-  const { date, client_code } = req.query;
+  const { date, client_code, telefono } = req.query;
   const allowed = resolveAllowedClientCodes(req.user);
 
   let clientCodes;
@@ -55,13 +55,13 @@ exports.list = asyncHandler(async (req, res) => {
     clientCodes = allowed === null ? CLIENT_CODES : allowed;
   }
 
-  const data = await SofiaHumanService.listCallsForDay({ clientCodes, date });
+  const data = await SofiaHumanService.listCallsForDay({ clientCodes, date, telefono });
   res.json({ data, count: data.length });
 });
 
-// GET /api/sofia-human/selections?status=&date_from=&date_to=&agente=&client_code=
+// GET /api/sofia-human/selections?status=&date_from=&date_to=&agente=&client_code=&telefono=
 exports.listSelections = asyncHandler(async (req, res) => {
-  const { status, date_from, date_to, agente, client_code } = req.query;
+  const { status, date_from, date_to, agente, client_code, telefono } = req.query;
   const allowed = resolveAllowedClientCodes(req.user);
 
   let clientCodes;
@@ -72,7 +72,7 @@ exports.listSelections = asyncHandler(async (req, res) => {
     clientCodes = allowed === null ? CLIENT_CODES : allowed;
   }
 
-  const data = await SofiaHumanService.listSelections({ clientCodes, status, dateFrom: date_from, dateTo: date_to, agente });
+  const data = await SofiaHumanService.listSelections({ clientCodes, status, dateFrom: date_from, dateTo: date_to, agente, telefono });
   res.json({ data, count: data.length });
 });
 

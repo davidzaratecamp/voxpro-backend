@@ -52,11 +52,18 @@ class SofiaHumanService {
    * semana (no la llamada puntual) — mismo criterio que audit_selections:
    * un agente se audita una vez por semana, sin importar cuál llamada.
    */
-  async listCallsForDay({ clientCodes, date }) {
+  async listCallsForDay({ clientCodes, date, telefono }) {
     const proyectoIds = proyectosForClientCodes(clientCodes);
     if (!proyectoIds.length) return [];
 
     const targetDate = date || new Date().toISOString().slice(0, 10);
+
+    const conditions = ['proyecto_id = ANY($1::int[])', 'registro_llamada_fecha = $2', 'time_speaking > 0'];
+    const params = [proyectoIds, targetDate];
+    if (telefono) {
+      params.push(`%${telefono}%`);
+      conditions.push(`registro_llamada_fono ILIKE $${params.length}`);
+    }
 
     const pgClient = await this._connect();
     let calls;
@@ -65,10 +72,10 @@ class SofiaHumanService {
         `SELECT registro_llamada_id, proyecto_id, registro_llamada_fecha, registro_llamada_hora,
                 registro_llamada_fono, agente_id, time_speaking, audiofile
          FROM registro_llamada
-         WHERE proyecto_id = ANY($1::int[]) AND registro_llamada_fecha = $2 AND time_speaking > 0
+         WHERE ${conditions.join(' AND ')}
          ORDER BY registro_llamada_hora DESC
          LIMIT 500`,
-        [proyectoIds, targetDate]
+        params
       );
       calls = result.rows.map((r) => this._mapRow(r));
     } finally {
@@ -253,7 +260,7 @@ class SofiaHumanService {
    * forma de ver lo ya auditado sin depender de volver al día exacto de
    * la llamada original.
    */
-  async listSelections({ clientCodes, status, dateFrom, dateTo, agente }) {
+  async listSelections({ clientCodes, status, dateFrom, dateTo, agente, telefono }) {
     const query = db('sofia_human_selections')
       .whereIn('client_code', clientCodes)
       .orderBy('fecha', 'desc')
@@ -268,6 +275,7 @@ class SofiaHumanService {
         qb.where('agente_id', 'like', `%${agente}%`).orWhere('agente_nombre', 'like', `%${agente}%`);
       });
     }
+    if (telefono) query.where('telefono', 'like', `%${telefono}%`);
 
     return query;
   }
