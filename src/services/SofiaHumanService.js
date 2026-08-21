@@ -10,7 +10,8 @@ const logger = require('../utils/logger');
 const db = require('../database/connection');
 const AuditService = require('./AuditService');
 const GeminiService = require('./GeminiService');
-const { downloadBuffer } = require('../controllers/RealtimeScanService');
+const RealtimeScanService = require('../controllers/RealtimeScanService');
+const { downloadBuffer } = RealtimeScanService;
 
 const execFileAsync = promisify(execFile);
 
@@ -79,11 +80,14 @@ class SofiaHumanService {
   }
 
   /**
-   * Resuelve el nombre del agente desde `recordings` — la fuente del bot solo
-   * trae la cédula (agente_id), pero estos mismos agentes ya tienen nombre
-   * ahí porque también toman llamadas orgánicas de Claro Hogar/TyT que sí se
-   * escanean con nombre. Se toma el nombre más frecuente por si hay variantes
-   * de formato ("Mateo Torres" vs "Torres Mateo").
+   * Resuelve el nombre del agente en dos pasos, igual de completo que
+   * "Auditorías" estándar:
+   *  1. `recordings` local — rápido, cubre agentes que ya tuvieron alguna
+   *     llamada orgánica escaneada.
+   *  2. Para los que sigan sin nombre: `empleado` en vivo en el Aware
+   *     estándar del cliente (misma fuente que usa "Auditorías" para
+   *     mostrar el 100% de los agentes) — cubre también a un agente nuevo
+   *     cuya primera llamada nunca pasó por el escaneo estándar.
    */
   async _attachAgentNames(calls) {
     if (!calls.length) return calls;
@@ -100,6 +104,26 @@ class SofiaHumanService {
     const nameMap = new Map();
     for (const row of rows) {
       if (!nameMap.has(row.agent_id)) nameMap.set(row.agent_id, row.agent_name);
+    }
+
+    const stillMissing = agentIds.filter((id) => !nameMap.has(id));
+    if (stillMissing.length) {
+      const byClientCode = new Map();
+      for (const c of calls) {
+        if (!stillMissing.includes(c.agente_id)) continue;
+        if (!byClientCode.has(c.client_code)) byClientCode.set(c.client_code, new Set());
+        byClientCode.get(c.client_code).add(c.agente_id);
+      }
+      await Promise.all(
+        [...byClientCode.entries()].map(async ([clientCode, idsSet]) => {
+          try {
+            const liveMap = await RealtimeScanService.getEmployeeNames([...idsSet], clientCode);
+            for (const [id, name] of liveMap) nameMap.set(id, name);
+          } catch (err) {
+            logger.warn(`SofiaHumanService: no se pudo resolver nombres en vivo para ${clientCode}`, { message: err.message });
+          }
+        }),
+      );
     }
 
     return calls.map((c) => ({ ...c, agente_nombre: nameMap.get(c.agente_id) || null }));
@@ -179,13 +203,23 @@ class SofiaHumanService {
       .orderBy('cnt', 'desc')
       .first();
 
+    let agenteNombre = agentRow ? agentRow.agent_name : null;
+    if (!agenteNombre) {
+      try {
+        const liveMap = await RealtimeScanService.getEmployeeNames([call.agente_id], clientCode);
+        agenteNombre = liveMap.get(call.agente_id) || null;
+      } catch (err) {
+        logger.warn('SofiaHumanService: no se pudo resolver nombre en vivo al seleccionar', { message: err.message });
+      }
+    }
+
     try {
       const [id] = await db('sofia_human_selections').insert({
         registro_llamada_id: call.registro_llamada_id,
         proyecto_id: call.proyecto_id,
         client_code: clientCode,
         agente_id: call.agente_id,
-        agente_nombre: agentRow ? agentRow.agent_name : null,
+        agente_nombre: agenteNombre,
         telefono: call.telefono,
         fecha: call.fecha,
         hora: call.hora,

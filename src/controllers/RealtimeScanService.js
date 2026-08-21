@@ -552,6 +552,64 @@ class RealtimeScanService {
   async downloadAudio(audioUrl) {
     return downloadBuffer(audioUrl);
   }
+
+  /**
+   * Resuelve nombres de agentes consultando `empleado` en vivo en las fuentes
+   * Aware estándar del clientCode dado. A diferencia de leer `recordings`
+   * (que solo tiene nombre si ese agente YA tuvo una llamada orgánica
+   * escaneada), esto encuentra también a un agente nuevo cuya primera
+   * llamada nunca pasó por el escaneo estándar — es la misma fuente que usa
+   * "Auditorías" para mostrar el 100% de los agentes con nombre.
+   */
+  async getEmployeeNames(agentIds, clientCode) {
+    if (!agentIds.length) return new Map();
+
+    const sources = AWARE_SOURCES.filter((s) => s.clientCode === clientCode && s.schema === 'standard');
+    const seen = new Set();
+    const toQuery = [];
+    for (const src of sources) {
+      const key = `${src.db.host}:${src.db.database}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      toQuery.push(src);
+    }
+
+    const nameMap = new Map();
+    const results = await Promise.allSettled(
+      toQuery.map(async (src) => {
+        let tunnel = null;
+        let pgClient = null;
+        try {
+          tunnel = await openTunnel(src.db.host, src.db.port);
+          pgClient = new PGClient({
+            host: '127.0.0.1',
+            port: tunnel.port,
+            database: src.db.database,
+            user: src.db.user,
+            password: src.db.password,
+            statement_timeout: 15000,
+          });
+          await pgClient.connect();
+          const result = await pgClient.query(
+            'SELECT empleado_rut, empleado_name FROM empleado WHERE empleado_rut = ANY($1::text[])',
+            [agentIds],
+          );
+          return result.rows;
+        } finally {
+          if (pgClient) await pgClient.end().catch(() => {});
+          if (tunnel) { tunnel.server.close(); tunnel.sshClient.end(); }
+        }
+      }),
+    );
+
+    for (const r of results) {
+      if (r.status !== 'fulfilled') continue;
+      for (const row of r.value) {
+        if (!nameMap.has(row.empleado_rut)) nameMap.set(row.empleado_rut, row.empleado_name);
+      }
+    }
+    return nameMap;
+  }
 }
 
 module.exports = new RealtimeScanService();
