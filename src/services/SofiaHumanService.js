@@ -65,7 +65,35 @@ class SofiaHumanService {
       await pgClient.end().catch(() => {});
     }
 
+    calls = await this._attachAgentNames(calls);
     return this._attachSelections(calls, targetDate);
+  }
+
+  /**
+   * Resuelve el nombre del agente desde `recordings` — la fuente del bot solo
+   * trae la cédula (agente_id), pero estos mismos agentes ya tienen nombre
+   * ahí porque también toman llamadas orgánicas de Claro Hogar/TyT que sí se
+   * escanean con nombre. Se toma el nombre más frecuente por si hay variantes
+   * de formato ("Mateo Torres" vs "Torres Mateo").
+   */
+  async _attachAgentNames(calls) {
+    if (!calls.length) return calls;
+    const agentIds = [...new Set(calls.map((c) => c.agente_id))];
+
+    const rows = await db('recordings')
+      .whereIn('agent_id', agentIds)
+      .whereNotNull('agent_name')
+      .select('agent_id', 'agent_name')
+      .count('* as cnt')
+      .groupBy('agent_id', 'agent_name')
+      .orderBy('cnt', 'desc');
+
+    const nameMap = new Map();
+    for (const row of rows) {
+      if (!nameMap.has(row.agent_id)) nameMap.set(row.agent_id, row.agent_name);
+    }
+
+    return calls.map((c) => ({ ...c, agente_nombre: nameMap.get(c.agente_id) || null }));
   }
 
   /**
@@ -133,12 +161,22 @@ class SofiaHumanService {
     const call = this._mapRow(row);
     const { monday, sunday } = AuditService._getWeekBounds(call.fecha);
 
+    const agentRow = await db('recordings')
+      .where('agent_id', call.agente_id)
+      .whereNotNull('agent_name')
+      .select('agent_name')
+      .count('* as cnt')
+      .groupBy('agent_name')
+      .orderBy('cnt', 'desc')
+      .first();
+
     try {
       const [id] = await db('sofia_human_selections').insert({
         registro_llamada_id: call.registro_llamada_id,
         proyecto_id: call.proyecto_id,
         client_code: clientCode,
         agente_id: call.agente_id,
+        agente_nombre: agentRow ? agentRow.agent_name : null,
         telefono: call.telefono,
         fecha: call.fecha,
         hora: call.hora,
