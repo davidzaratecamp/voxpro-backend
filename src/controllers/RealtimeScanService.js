@@ -591,7 +591,7 @@ class RealtimeScanService {
           });
           await pgClient.connect();
           const result = await pgClient.query(
-            'SELECT empleado_rut, empleado_name FROM empleado WHERE empleado_rut = ANY($1::text[])',
+            'SELECT empleado_rut::text AS empleado_rut, empleado_name FROM empleado WHERE empleado_rut::text = ANY($1::text[])',
             [agentIds],
           );
           return result.rows;
