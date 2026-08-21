@@ -173,8 +173,13 @@ class SofiaHumanService {
     return affected > 0;
   }
 
+  /**
+   * A diferencia de v_voicebot_result (bot), donde audiofile ya trae la
+   * extensión, en registro_llamada de estas colas humanas el valor guardado
+   * no la incluye — el archivo real está en disco como "<audiofile>.WAV".
+   */
   getAudioUrl(audiofile) {
-    return `${voicebotSource.audioBaseUrl}/${audiofile}`;
+    return `${voicebotSource.audioBaseUrl}/${audiofile}.WAV`;
   }
 
   /**
