@@ -13,6 +13,8 @@ router.get('/calls', ctrl.list);
 router.get('/calls/:callId', ctrl.getById);
 router.get('/calls/:callId/audio', ctrl.streamAudio);
 router.get('/calls/:callId/audit', ctrl.getCallAudit);
+router.get('/calls/:callId/continuation', ctrl.getContinuation);
+router.get('/calls/:callId/continuation/audio', ctrl.streamContinuationAudio);
 
 router.get('/prompts', ctrl.getPrompts);
 router.put('/prompts/:proyectoId', ctrl.savePrompt);

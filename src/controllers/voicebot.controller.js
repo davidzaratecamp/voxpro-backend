@@ -5,6 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const asyncHandler = require('../middleware/asyncHandler');
 const VoicebotService = require('../services/VoicebotService');
+const SofiaHumanService = require('../services/SofiaHumanService');
 const voicebotSource = require('../config/voicebotSource');
 const { downloadBuffer } = require('./RealtimeScanService');
 const { resolveAllowedProyectos } = require('../utils/voicebotAccess');
@@ -91,6 +92,64 @@ exports.streamAudio = asyncHandler(async (req, res) => {
       'Content-Type': 'audio/wav',
       'Content-Length': converted.length,
       'Content-Disposition': `inline; filename="${req.params.callId}.wav"`,
+      'Cache-Control': 'no-store',
+    });
+    res.send(converted);
+  } finally {
+    fs.unlink(tmpInput, () => {});
+    fs.unlink(tmpOutput, () => {});
+  }
+});
+
+// GET /api/voicebot/calls/:callId/continuation
+exports.getContinuation = asyncHandler(async (req, res) => {
+  const call = await VoicebotService.getCallById(req.params.callId);
+  if (!call) return res.status(404).json({ error: true, message: 'Llamada no encontrada' });
+  assertProyectoAccess(req, call.proyecto_id);
+
+  if (call.hangup_reason !== 'call_transfer') {
+    return res.json({ data: null });
+  }
+
+  const data = await SofiaHumanService.findAndAnalyzeContinuation(
+    call.call_id, call.proyecto_id, call.telefono, call.fecha, call.hora
+  );
+  res.json({ data });
+});
+
+// GET /api/voicebot/calls/:callId/continuation/audio
+exports.streamContinuationAudio = asyncHandler(async (req, res) => {
+  const call = await VoicebotService.getCallById(req.params.callId);
+  if (!call) return res.status(404).json({ error: true, message: 'Llamada no encontrada' });
+  assertProyectoAccess(req, call.proyecto_id);
+
+  const cont = await SofiaHumanService.findAndAnalyzeContinuation(
+    call.call_id, call.proyecto_id, call.telefono, call.fecha, call.hora
+  );
+  if (!cont || !cont.audiofile) return res.status(404).json({ error: true, message: 'Audio no encontrado' });
+
+  const audioUrl = SofiaHumanService.getAudioUrl(cont.audiofile);
+  const audioBuffer = await downloadBuffer(audioUrl);
+
+  const tmpDir = os.tmpdir();
+  const tmpInput = path.join(tmpDir, `voicebot_cont_in_${Date.now()}.wav`);
+  const tmpOutput = path.join(tmpDir, `voicebot_cont_out_${Date.now()}.wav`);
+
+  try {
+    fs.writeFileSync(tmpInput, audioBuffer);
+    await execFileAsync('ffmpeg', [
+      '-y', '-i', tmpInput,
+      '-acodec', 'pcm_s16le',
+      '-ar', '16000',
+      '-ac', '1',
+      tmpOutput,
+    ]);
+    const converted = fs.readFileSync(tmpOutput);
+
+    res.set({
+      'Content-Type': 'audio/wav',
+      'Content-Length': converted.length,
+      'Content-Disposition': `inline; filename="${req.params.callId}_continuation.wav"`,
       'Cache-Control': 'no-store',
     });
     res.send(converted);

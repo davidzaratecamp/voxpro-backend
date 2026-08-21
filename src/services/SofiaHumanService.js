@@ -214,26 +214,7 @@ class SofiaHumanService {
     const call = this._mapRow(row);
     const { monday, sunday } = AuditService._getWeekBounds(call.fecha);
 
-    let agenteNombre = call.agente_nombre_bot;
-    if (!agenteNombre) {
-      const agentRow = await db('recordings')
-        .where('agent_id', call.agente_id)
-        .whereNotNull('agent_name')
-        .select('agent_name')
-        .count('* as cnt')
-        .groupBy('agent_name')
-        .orderBy('cnt', 'desc')
-        .first();
-      agenteNombre = agentRow ? agentRow.agent_name : null;
-    }
-    if (!agenteNombre) {
-      try {
-        const liveMap = await RealtimeScanService.getEmployeeNames([call.agente_id], clientCode);
-        agenteNombre = liveMap.get(call.agente_id) || null;
-      } catch (err) {
-        logger.warn('SofiaHumanService: no se pudo resolver nombre en vivo al seleccionar', { message: err.message });
-      }
-    }
+    const agenteNombre = await this._resolveSingleAgentName(call.agente_id, clientCode, call.agente_nombre_bot);
 
     try {
       const [id] = await db('sofia_human_selections').insert({
@@ -266,6 +247,153 @@ class SofiaHumanService {
 
   async getSelectionById(id) {
     return db('sofia_human_selections').where({ id }).first();
+  }
+
+  /** Misma prioridad de _attachAgentNames, para un solo agente. */
+  async _resolveSingleAgentName(agenteId, clientCode, botName) {
+    if (botName) return botName;
+
+    const agentRow = await db('recordings')
+      .where('agent_id', agenteId)
+      .whereNotNull('agent_name')
+      .select('agent_name')
+      .count('* as cnt')
+      .groupBy('agent_name')
+      .orderBy('cnt', 'desc')
+      .first();
+    if (agentRow) return agentRow.agent_name;
+
+    try {
+      const liveMap = await RealtimeScanService.getEmployeeNames([agenteId], clientCode);
+      return liveMap.get(agenteId) || null;
+    } catch (err) {
+      logger.warn('SofiaHumanService: no se pudo resolver nombre en vivo', { message: err.message });
+      return null;
+    }
+  }
+
+  /**
+   * Encuentra y audita automáticamente la continuación humana de una llamada
+   * del bot: la llamada de agente humano en la cola correspondiente
+   * (proyecto 7/9=Hogar, 10/11=TyT) con el MISMO teléfono, justo después de
+   * que el bot colgó. Cacheado por bot_call_id — no depende de si ese agente
+   * ya tiene otra selección esa semana (a diferencia de sofia_human_selections),
+   * porque acá se necesita esa continuación exacta.
+   */
+  async findAndAnalyzeContinuation(botCallId, botProyectoId, telefono, fecha, hora) {
+    const existing = await db('sofia_continuation_audits').where({ bot_call_id: botCallId }).first();
+    if (existing) return existing;
+
+    const clientCode = voicebotSource.clientCodeToProyecto
+      ? Object.keys(voicebotSource.clientCodeToProyecto).find((cc) => voicebotSource.clientCodeToProyecto[cc] === botProyectoId)
+      : null;
+    const proyectoIds = clientCode ? proyectosForClientCodes([clientCode]) : [];
+
+    let row = null;
+    if (proyectoIds.length && telefono) {
+      const pgClient = await this._connect();
+      try {
+        const result = await pgClient.query(
+          `SELECT registro_llamada_id, proyecto_id, registro_llamada_fecha, registro_llamada_hora,
+                  registro_llamada_fono, agente_id, time_speaking, audiofile,
+                  json_data->>'agente' AS agente_nombre_bot
+           FROM registro_llamada
+           WHERE proyecto_id = ANY($1::int[]) AND registro_llamada_fono = $2
+             AND registro_llamada_fecha = $3 AND registro_llamada_hora > $4
+             AND time_speaking > 0
+           ORDER BY registro_llamada_hora ASC
+           LIMIT 1`,
+          [proyectoIds, telefono, fecha, hora]
+        );
+        row = result.rows[0] || null;
+      } finally {
+        await pgClient.end().catch(() => {});
+      }
+    }
+
+    if (!row) {
+      const [id] = await db('sofia_continuation_audits').insert({
+        bot_call_id: botCallId,
+        status: 'not_found',
+      });
+      return db('sofia_continuation_audits').where({ id }).first();
+    }
+
+    const call = this._mapRow(row);
+    const agenteNombre = await this._resolveSingleAgentName(call.agente_id, clientCode, call.agente_nombre_bot);
+
+    const baseRow = {
+      bot_call_id: botCallId,
+      registro_llamada_id: call.registro_llamada_id,
+      proyecto_id: call.proyecto_id,
+      client_code: clientCode,
+      agente_id: call.agente_id,
+      agente_nombre: agenteNombre,
+      telefono: call.telefono,
+      fecha: call.fecha,
+      hora: call.hora,
+      duracion: call.duracion,
+      audiofile: call.audiofile,
+    };
+
+    if (!call.audiofile) {
+      const [id] = await db('sofia_continuation_audits').insert({ ...baseRow, status: 'error', error_message: 'Sin audio disponible' });
+      return db('sofia_continuation_audits').where({ id }).first();
+    }
+
+    let insertedId;
+    try {
+      const rawBuffer = await downloadBuffer(this.getAudioUrl(call.audiofile));
+
+      const tmpInput = path.join(os.tmpdir(), `sofia_cont_in_${Date.now()}.wav`);
+      const tmpOutput = path.join(os.tmpdir(), `sofia_cont_out_${Date.now()}.ogg`);
+      let audioBuffer;
+      try {
+        fs.writeFileSync(tmpInput, rawBuffer);
+        await execFileAsync('ffmpeg', [
+          '-y', '-i', tmpInput,
+          '-acodec', 'libopus',
+          '-ar', '16000',
+          '-ac', '1',
+          '-b:a', '32k',
+          tmpOutput,
+        ]);
+        audioBuffer = fs.readFileSync(tmpOutput);
+      } finally {
+        try { fs.unlinkSync(tmpInput); } catch {}
+        try { fs.unlinkSync(tmpOutput); } catch {}
+      }
+
+      const { transcription, evaluation } = await GeminiService.analyzeCall(
+        audioBuffer,
+        clientCode,
+        call.agente_id,
+        call.proyecto_id,
+        'audio/ogg',
+        null
+      );
+
+      [insertedId] = await db('sofia_continuation_audits').insert({
+        ...baseRow,
+        transcription: transcription || null,
+        criteria_general: JSON.stringify(evaluation.general),
+        criteria_high_impact: JSON.stringify(evaluation.highImpact),
+        high_impact_failed: evaluation.highImpactFailed,
+        score: evaluation.score,
+        notes: evaluation.summary || null,
+        status: 'scored',
+      });
+      logger.info(`SofiaHumanService: continuación auditada para bot_call_id ${botCallId}`, { score: evaluation.score });
+    } catch (err) {
+      logger.error(`SofiaHumanService: error auditando continuación de ${botCallId}`, err);
+      [insertedId] = await db('sofia_continuation_audits').insert({
+        ...baseRow,
+        status: 'error',
+        error_message: err.message || 'Error al auditar la continuación',
+      });
+    }
+
+    return db('sofia_continuation_audits').where({ id: insertedId }).first();
   }
 
   /**
