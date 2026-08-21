@@ -19,4 +19,14 @@ module.exports = {
     claro_hogar: 12,
     claro_tyt: 13,
   },
+  // Colas de agentes humanos donde aterrizan las transferencias de SOFIA
+  // (misma base de datos, proyecto_id distinto al del bot). Nombres reales
+  // según json_data.proyecto_name: 7="Inb Hogar IA", 9="Inb Hogar IA 2",
+  // 10="Inb T&T IA", 11="Inb T&T IA 2".
+  humanProyectos: {
+    7: 'claro_hogar',
+    9: 'claro_hogar',
+    10: 'claro_tyt',
+    11: 'claro_tyt',
+  },
 };

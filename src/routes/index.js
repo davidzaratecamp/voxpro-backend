@@ -16,6 +16,7 @@ router.use('/realtime', auth, require('./realtime.routes'));
 router.use('/hc', auth, require('./hc.routes'));
 router.use('/daily-analysis', auth, require('./dailyAnalysis.routes'));
 router.use('/voicebot', auth, require('./voicebot.routes'));
+router.use('/sofia-human', auth, require('./sofiaHuman.routes'));
 
 // Health check
 router.get('/health', (req, res) => {
