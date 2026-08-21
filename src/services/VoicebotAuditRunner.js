@@ -2,6 +2,7 @@ const db = require('../database/connection');
 const logger = require('../utils/logger');
 const VoicebotService = require('./VoicebotService');
 const GeminiService = require('./GeminiService');
+const SofiaHumanService = require('./SofiaHumanService');
 
 const PROYECTO_IDS = [12, 13];
 const BATCH_SIZE = 40; // cuántas llamadas se traen y procesan en paralelo por corrida, por campaña
@@ -85,6 +86,26 @@ class VoicebotAuditRunner {
       // próxima corrida pide el tramo siguiente en vez de repetir este.
       const last = calls[calls.length - 1];
       await VoicebotService.advanceScanCursor(proyectoId, `${last.fecha} ${last.hora}`);
+
+      // Justo después de auditar al bot, audita también la continuación
+      // humana de las llamadas transferidas de este proyecto — mismo switch
+      // (ya se validó settings.enabled arriba), sin depender de que alguien
+      // abra el modal.
+      try {
+        const contResult = await SofiaHumanService.processPendingContinuations(proyectoId, 20);
+        if (contResult.spendingCapHit) {
+          logger.error('VoicebotAuditRunner: cuota de Gemini agotada (continuación humana), deteniendo auditoría automática');
+          await VoicebotService.autoDisableAllEnabled(
+            'Se agotó la cuota de tokens de Gemini (IA). La auditoría automática se detuvo sola.'
+          );
+          return;
+        }
+        if (contResult.processed) {
+          logger.info(`VoicebotAuditRunner: ${contResult.processed} continuaciones humanas procesadas para proyecto ${proyectoId}`);
+        }
+      } catch (err) {
+        logger.error(`VoicebotAuditRunner: error procesando continuaciones humanas de proyecto ${proyectoId}`, err);
+      }
     }
   }
 

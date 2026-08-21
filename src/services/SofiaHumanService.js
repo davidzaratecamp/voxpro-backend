@@ -282,7 +282,11 @@ class SofiaHumanService {
    */
   async findAndAnalyzeContinuation(botCallId, botProyectoId, telefono, fecha, hora) {
     const existing = await db('sofia_continuation_audits').where({ bot_call_id: botCallId }).first();
-    if (existing) return existing;
+    // 'scored'/'error' son definitivos. 'not_found' solo es definitivo pasada
+    // la ventana de reintento (NOT_FOUND_RETRY_WINDOW_MS) — antes de eso, el
+    // agente humano puede simplemente no haber contestado todavía la cola.
+    if (existing && existing.status !== 'not_found') return existing;
+    if (existing && existing.status === 'not_found' && !this._isContinuationRetryDue(fecha, hora)) return existing;
 
     const clientCode = voicebotSource.clientCodeToProyecto
       ? Object.keys(voicebotSource.clientCodeToProyecto).find((cc) => voicebotSource.clientCodeToProyecto[cc] === botProyectoId)
@@ -312,10 +316,7 @@ class SofiaHumanService {
     }
 
     if (!row) {
-      const [id] = await db('sofia_continuation_audits').insert({
-        bot_call_id: botCallId,
-        status: 'not_found',
-      });
+      const id = await this._upsertContinuation(existing?.id, { bot_call_id: botCallId, status: 'not_found' });
       return db('sofia_continuation_audits').where({ id }).first();
     }
 
@@ -337,11 +338,11 @@ class SofiaHumanService {
     };
 
     if (!call.audiofile) {
-      const [id] = await db('sofia_continuation_audits').insert({ ...baseRow, status: 'error', error_message: 'Sin audio disponible' });
+      const id = await this._upsertContinuation(existing?.id, { ...baseRow, status: 'error', error_message: 'Sin audio disponible' });
       return db('sofia_continuation_audits').where({ id }).first();
     }
 
-    let insertedId;
+    let finalId;
     try {
       const rawBuffer = await downloadBuffer(this.getAudioUrl(call.audiofile));
 
@@ -373,7 +374,7 @@ class SofiaHumanService {
         null
       );
 
-      [insertedId] = await db('sofia_continuation_audits').insert({
+      finalId = await this._upsertContinuation(existing?.id, {
         ...baseRow,
         transcription: transcription || null,
         criteria_general: JSON.stringify(evaluation.general),
@@ -385,15 +386,99 @@ class SofiaHumanService {
       });
       logger.info(`SofiaHumanService: continuación auditada para bot_call_id ${botCallId}`, { score: evaluation.score });
     } catch (err) {
+      // Cuota agotada: no hay nada más que hacer acá — se relanza para que
+      // el llamador (VoicebotAuditRunner) lo detecte y detenga todo, igual
+      // que ya hace con la auditoría del propio bot.
+      if (err.isSpendingCap) throw err;
+
       logger.error(`SofiaHumanService: error auditando continuación de ${botCallId}`, err);
-      [insertedId] = await db('sofia_continuation_audits').insert({
+      finalId = await this._upsertContinuation(existing?.id, {
         ...baseRow,
         status: 'error',
         error_message: err.message || 'Error al auditar la continuación',
       });
     }
 
-    return db('sofia_continuation_audits').where({ id: insertedId }).first();
+    return db('sofia_continuation_audits').where({ id: finalId }).first();
+  }
+
+  /** Ventana durante la cual reintentar un 'not_found' (el humano puede no haber contestado aún). */
+  _isContinuationRetryDue(fecha, hora) {
+    const NOT_FOUND_RETRY_WINDOW_MS = 3 * 60 * 60 * 1000; // 3 horas
+    const fechaStr = fecha instanceof Date ? fecha.toISOString().slice(0, 10) : String(fecha).slice(0, 10);
+    const horaStr = String(hora).slice(0, 8);
+    const botTime = new Date(`${fechaStr}T${horaStr}`).getTime();
+    if (Number.isNaN(botTime)) return true;
+    return (Date.now() - botTime) < NOT_FOUND_RETRY_WINDOW_MS;
+  }
+
+  async _upsertContinuation(existingId, row) {
+    if (existingId) {
+      await db('sofia_continuation_audits').where({ id: existingId }).update({ ...row, updated_at: db.fn.now() });
+      return existingId;
+    }
+    const [id] = await db('sofia_continuation_audits').insert(row);
+    return id;
+  }
+
+  /**
+   * Llamado desde VoicebotAuditRunner en cada corrida: busca y audita
+   * automáticamente las continuaciones pendientes de un proyecto del bot,
+   * sin que nadie tenga que abrir el modal. Candidatas: llamadas
+   * transferidas de las últimas 4 horas, con al menos 5 minutos de
+   * antigüedad (para dar tiempo a que la cola humana conteste), que no
+   * tengan ya una continuación resuelta ('scored'/'error') ni un
+   * 'not_found' todavía dentro de su ventana de reintento.
+   */
+  async processPendingContinuations(botProyectoId, limit = 20) {
+    const pgClient = await this._connect();
+    let candidates;
+    try {
+      const result = await pgClient.query(
+        `SELECT call_id, fecha, hora, telefono
+         FROM v_voicebot_result
+         WHERE proyecto_id = $1 AND hangup_reason = 'call_transfer'
+           AND fecha >= CURRENT_DATE - INTERVAL '1 day'
+         ORDER BY fecha DESC, hora DESC
+         LIMIT 500`,
+        [botProyectoId]
+      );
+      candidates = result.rows;
+    } finally {
+      await pgClient.end().catch(() => {});
+    }
+    if (!candidates.length) return { processed: 0, spendingCapHit: false };
+
+    const toDateStr = (v) => (v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10));
+    const callIds = candidates.map((c) => c.call_id);
+    const existingRows = await db('sofia_continuation_audits')
+      .whereIn('bot_call_id', callIds)
+      .select('bot_call_id', 'status');
+    const existingMap = new Map(existingRows.map((r) => [r.bot_call_id, r.status]));
+
+    const FIVE_MIN_MS = 5 * 60 * 1000;
+    const now = Date.now();
+
+    const pending = candidates.filter((c) => {
+      const fechaStr = toDateStr(c.fecha);
+      const horaStr = String(c.hora).slice(0, 8);
+      const botTime = new Date(`${fechaStr}T${horaStr}`).getTime();
+      if (!Number.isNaN(botTime) && (now - botTime) < FIVE_MIN_MS) return false; // muy reciente, aún no contestan
+
+      const status = existingMap.get(c.call_id);
+      if (!status) return true;
+      if (status === 'scored' || status === 'error') return false;
+      return this._isContinuationRetryDue(c.fecha, c.hora); // 'not_found' reintentable
+    }).slice(0, limit);
+
+    if (!pending.length) return { processed: 0, spendingCapHit: false };
+
+    const results = await Promise.allSettled(
+      pending.map((c) => this.findAndAnalyzeContinuation(c.call_id, botProyectoId, c.telefono, toDateStr(c.fecha), String(c.hora)))
+    );
+
+    const spendingCapHit = results.some((r) => r.status === 'rejected' && r.reason?.isSpendingCap);
+    return { processed: pending.length, spendingCapHit };
   }
 
   /**
