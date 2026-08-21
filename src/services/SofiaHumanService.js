@@ -417,8 +417,13 @@ class SofiaHumanService {
       await db('sofia_continuation_audits').where({ id: existingId }).update({ ...row, updated_at: db.fn.now() });
       return existingId;
     }
-    const [id] = await db('sofia_continuation_audits').insert(row);
-    return id;
+    // onConflict/merge como red de seguridad: si dos llamadas concurrentes
+    // (ej. el cron y alguien abriendo el modal a la vez) procesan el mismo
+    // bot_call_id sin haberse visto la una a la otra todavía, la segunda no
+    // revienta con duplicate key — simplemente actualiza la misma fila.
+    await db('sofia_continuation_audits').insert(row).onConflict('bot_call_id').merge();
+    const saved = await db('sofia_continuation_audits').where({ bot_call_id: row.bot_call_id }).first();
+    return saved.id;
   }
 
   /**
