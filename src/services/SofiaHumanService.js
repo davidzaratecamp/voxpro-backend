@@ -40,6 +40,10 @@ class SofiaHumanService {
       hora: row.registro_llamada_hora,
       telefono: row.registro_llamada_fono,
       agente_id: row.agente_id,
+      // La propia fuente del bot ya trae el nombre en json_data.agente —
+      // cobertura prácticamente total, no depende de que el agente ya
+      // esté en recordings ni de que Claro lo tenga cargado en Aware.
+      agente_nombre_bot: row.agente_nombre_bot ? row.agente_nombre_bot.trim() : null,
       duracion: row.time_speaking,
       audiofile: row.audiofile,
     };
@@ -70,7 +74,8 @@ class SofiaHumanService {
     try {
       const result = await pgClient.query(
         `SELECT registro_llamada_id, proyecto_id, registro_llamada_fecha, registro_llamada_hora,
-                registro_llamada_fono, agente_id, time_speaking, audiofile
+                registro_llamada_fono, agente_id, time_speaking, audiofile,
+                json_data->>'agente' AS agente_nombre_bot
          FROM registro_llamada
          WHERE ${conditions.join(' AND ')}
          ORDER BY registro_llamada_hora DESC
@@ -87,30 +92,37 @@ class SofiaHumanService {
   }
 
   /**
-   * Resuelve el nombre del agente en dos pasos, igual de completo que
-   * "Auditorías" estándar:
-   *  1. `recordings` local — rápido, cubre agentes que ya tuvieron alguna
-   *     llamada orgánica escaneada.
-   *  2. Para los que sigan sin nombre: `empleado` en vivo en el Aware
-   *     estándar del cliente (misma fuente que usa "Auditorías" para
-   *     mostrar el 100% de los agentes) — cubre también a un agente nuevo
-   *     cuya primera llamada nunca pasó por el escaneo estándar.
+   * Resuelve el nombre del agente, de más a menos confiable:
+   *  1. `json_data.agente` de la propia fuente del bot — ya viene en la
+   *     misma consulta, cobertura prácticamente total (confirmado: 4286/4286
+   *     llamadas de los últimos 5 días lo traen), incluso para agentes que
+   *     Claro aún no ha dado de alta en su Aware.
+   *  2. `recordings` local — cubre agentes que ya tuvieron alguna llamada
+   *     orgánica escaneada, por si algún registro puntual no trae (1).
+   *  3. `empleado` en vivo en el Aware estándar del cliente (misma fuente
+   *     que usa "Auditorías") — último recurso.
    */
   async _attachAgentNames(calls) {
     if (!calls.length) return calls;
     const agentIds = [...new Set(calls.map((c) => c.agente_id))];
 
-    const rows = await db('recordings')
-      .whereIn('agent_id', agentIds)
-      .whereNotNull('agent_name')
-      .select('agent_id', 'agent_name')
-      .count('* as cnt')
-      .groupBy('agent_id', 'agent_name')
-      .orderBy('cnt', 'desc');
-
     const nameMap = new Map();
-    for (const row of rows) {
-      if (!nameMap.has(row.agent_id)) nameMap.set(row.agent_id, row.agent_name);
+    for (const c of calls) {
+      if (c.agente_nombre_bot && !nameMap.has(c.agente_id)) nameMap.set(c.agente_id, c.agente_nombre_bot);
+    }
+
+    const missingAfterBot = agentIds.filter((id) => !nameMap.has(id));
+    if (missingAfterBot.length) {
+      const rows = await db('recordings')
+        .whereIn('agent_id', missingAfterBot)
+        .whereNotNull('agent_name')
+        .select('agent_id', 'agent_name')
+        .count('* as cnt')
+        .groupBy('agent_id', 'agent_name')
+        .orderBy('cnt', 'desc');
+      for (const row of rows) {
+        if (!nameMap.has(row.agent_id)) nameMap.set(row.agent_id, row.agent_name);
+      }
     }
 
     const stillMissing = agentIds.filter((id) => !nameMap.has(id));
@@ -181,7 +193,8 @@ class SofiaHumanService {
     try {
       const result = await pgClient.query(
         `SELECT registro_llamada_id, proyecto_id, registro_llamada_fecha, registro_llamada_hora,
-                registro_llamada_fono, agente_id, time_speaking, audiofile
+                registro_llamada_fono, agente_id, time_speaking, audiofile,
+                json_data->>'agente' AS agente_nombre_bot
          FROM registro_llamada
          WHERE registro_llamada_id = $1 AND proyecto_id = $2
          LIMIT 1`,
@@ -201,16 +214,18 @@ class SofiaHumanService {
     const call = this._mapRow(row);
     const { monday, sunday } = AuditService._getWeekBounds(call.fecha);
 
-    const agentRow = await db('recordings')
-      .where('agent_id', call.agente_id)
-      .whereNotNull('agent_name')
-      .select('agent_name')
-      .count('* as cnt')
-      .groupBy('agent_name')
-      .orderBy('cnt', 'desc')
-      .first();
-
-    let agenteNombre = agentRow ? agentRow.agent_name : null;
+    let agenteNombre = call.agente_nombre_bot;
+    if (!agenteNombre) {
+      const agentRow = await db('recordings')
+        .where('agent_id', call.agente_id)
+        .whereNotNull('agent_name')
+        .select('agent_name')
+        .count('* as cnt')
+        .groupBy('agent_name')
+        .orderBy('cnt', 'desc')
+        .first();
+      agenteNombre = agentRow ? agentRow.agent_name : null;
+    }
     if (!agenteNombre) {
       try {
         const liveMap = await RealtimeScanService.getEmployeeNames([call.agente_id], clientCode);
