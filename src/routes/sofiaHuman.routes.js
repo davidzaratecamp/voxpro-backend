@@ -15,6 +15,10 @@ function requireRole(...roles) {
 // del gate general para no heredar su restricción a supervisor_calidad/gestor_usuarios.
 router.get('/commercial-stats', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.getCommercialStats);
 
+// "Feedback" (historial de lo entregado a los agentes): también lo ven las
+// cuentas auditor_ia — mismo motivo que commercial-stats arriba.
+router.get('/feedback', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.getFeedback);
+
 // El resto del módulo (seleccionar/auditar llamadas humanas) es solo para
 // quien audita al agente humano — auditor_ia no lo usa.
 router.use(requireRole('supervisor_calidad', 'gestor_usuarios'));

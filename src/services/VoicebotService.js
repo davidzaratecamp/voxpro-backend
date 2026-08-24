@@ -105,7 +105,7 @@ class VoicebotService {
 
     const continuations = await db('sofia_continuation_audits')
       .whereIn('bot_call_id', callIds)
-      .select('bot_call_id', 'score', 'status');
+      .select('bot_call_id', 'score', 'status', 'agente_id', 'agente_nombre');
     const contMap = new Map(continuations.map((c) => [c.bot_call_id, c]));
 
     return calls.map((c) => {
@@ -117,6 +117,10 @@ class VoicebotService {
         missed_transfer: a ? !!a.missed_transfer : false,
         missed_transfer_reason: a ? a.missed_transfer_reason : null,
         agente_score: cont && cont.status === 'scored' ? cont.score : null,
+        // Para el filtro de agente en "Auditoría IA" — solo llamadas con
+        // continuación traen agente identificado (las que no se transfirieron no).
+        agente_id: cont ? cont.agente_id : null,
+        agente_nombre: cont ? cont.agente_nombre : null,
       };
     });
   }

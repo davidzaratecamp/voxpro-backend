@@ -117,6 +117,17 @@ exports.getContinuation = asyncHandler(async (req, res) => {
   res.json({ data });
 });
 
+// POST /api/voicebot/calls/:callId/continuation/deliver
+// El coordinador descargó/entregó el PDF de feedback — queda en su historial ("Feedback").
+exports.markContinuationDelivered = asyncHandler(async (req, res) => {
+  const call = await VoicebotService.getCallById(req.params.callId);
+  if (!call) return res.status(404).json({ error: true, message: 'Llamada no encontrada' });
+  assertProyectoAccess(req, call.proyecto_id);
+
+  const data = await SofiaHumanService.markDelivered(call.call_id, req.user.id);
+  res.json({ data });
+});
+
 // GET /api/voicebot/calls/:callId/continuation/audio
 exports.streamContinuationAudio = asyncHandler(async (req, res) => {
   const call = await VoicebotService.getCallById(req.params.callId);

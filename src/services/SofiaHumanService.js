@@ -500,6 +500,68 @@ class SofiaHumanService {
   }
 
   /**
+   * Marca una continuación ya calificada como "entregada" — el coordinador
+   * descargó/imprimió el PDF de feedback para dárselo al agente. Base del
+   * ítem de sidebar "Feedback" (historial de lo que cada coordinador ha
+   * entregado). Se puede volver a marcar (re-descarga), simplemente
+   * actualiza la marca de tiempo.
+   */
+  async markDelivered(botCallId, userId) {
+    const updated = await db('sofia_continuation_audits')
+      .where({ bot_call_id: botCallId, status: 'scored' })
+      .update({ delivered_by: userId, delivered_at: db.fn.now() });
+    if (!updated) {
+      const err = new Error('Continuación no encontrada o aún no calificada');
+      err.statusCode = 404;
+      throw err;
+    }
+    return db('sofia_continuation_audits').where({ bot_call_id: botCallId }).first();
+  }
+
+  /**
+   * Historial de feedbacks entregados — lo que ve el ítem "Feedback" del
+   * sidebar. Acotado a `deliveredBy` (el propio coordinador) salvo que
+   * venga null (gestor_usuarios, que ve de todos). Trae el nombre de quien
+   * entregó cada uno para cuando gestor_usuarios ve el listado completo.
+   */
+  async listFeedback({ clientCodes, deliveredBy, agente, dateFrom, dateTo }) {
+    const q = db('sofia_continuation_audits')
+      .whereIn('client_code', clientCodes)
+      .whereNotNull('delivered_at');
+    if (deliveredBy) q.where('delivered_by', deliveredBy);
+    if (agente) {
+      q.where((b) => {
+        b.where('agente_nombre', 'like', `%${agente}%`).orWhere('agente_id', 'like', `%${agente}%`);
+      });
+    }
+    if (dateFrom) q.where('fecha', '>=', dateFrom);
+    if (dateTo) q.where('fecha', '<=', dateTo);
+
+    const rows = await q
+      .orderBy('delivered_at', 'desc')
+      .select(
+        'id', 'bot_call_id', 'client_code', 'agente_id', 'agente_nombre', 'telefono',
+        'fecha', 'hora', 'duracion', 'score', 'high_impact_failed', 'notes',
+        'criteria_general', 'criteria_high_impact', 'transcription',
+        'delivered_by', 'delivered_at', 'created_at', 'updated_at',
+      );
+
+    const deliveredByIds = [...new Set(rows.map((r) => r.delivered_by).filter(Boolean))];
+    let userMap = new Map();
+    if (deliveredByIds.length) {
+      const users = await db('users').whereIn('id', deliveredByIds).select('id', 'name', 'username');
+      userMap = new Map(users.map((u) => [u.id, u.name || u.username]));
+    }
+
+    return rows.map((r) => ({
+      ...r,
+      criteria_general: typeof r.criteria_general === 'string' ? JSON.parse(r.criteria_general) : r.criteria_general,
+      criteria_high_impact: typeof r.criteria_high_impact === 'string' ? JSON.parse(r.criteria_high_impact) : r.criteria_high_impact,
+      delivered_by_name: userMap.get(r.delivered_by) || null,
+    }));
+  }
+
+  /**
    * Llamado desde VoicebotAuditRunner en cada corrida: busca y audita
    * automáticamente las continuaciones pendientes de un proyecto del bot,
    * sin que nadie tenga que abrir el modal. Candidatas: llamadas

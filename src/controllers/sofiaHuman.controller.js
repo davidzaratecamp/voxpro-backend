@@ -93,6 +93,26 @@ exports.getCommercialStats = asyncHandler(async (req, res) => {
   res.json({ data });
 });
 
+// GET /api/sofia-human/feedback?agente=&date_from=&date_to=&client_code=
+// Historial de feedbacks entregados — gestor_usuarios ve los de todos, el
+// resto (auditor_ia/supervisor_calidad) solo los que él mismo ha entregado.
+exports.getFeedback = asyncHandler(async (req, res) => {
+  const { agente, date_from, date_to, client_code } = req.query;
+  const allowed = resolveAllowedClientCodes(req.user);
+
+  let clientCodes;
+  if (client_code) {
+    assertClientAccess(req, client_code);
+    clientCodes = [client_code];
+  } else {
+    clientCodes = allowed === null ? CLIENT_CODES : allowed;
+  }
+
+  const deliveredBy = req.user.role === 'gestor_usuarios' ? null : req.user.id;
+  const data = await SofiaHumanService.listFeedback({ clientCodes, deliveredBy, agente, dateFrom: date_from, dateTo: date_to });
+  res.json({ data, count: data.length });
+});
+
 // POST /api/sofia-human/select { registro_llamada_id, proyecto_id }
 exports.select = asyncHandler(async (req, res) => {
   const proyectoId = Number(req.body.proyecto_id);

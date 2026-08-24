@@ -15,6 +15,7 @@ router.get('/calls/:callId/audio', ctrl.streamAudio);
 router.get('/calls/:callId/audit', ctrl.getCallAudit);
 router.get('/calls/:callId/continuation', ctrl.getContinuation);
 router.get('/calls/:callId/continuation/audio', ctrl.streamContinuationAudio);
+router.post('/calls/:callId/continuation/deliver', ctrl.markContinuationDelivered);
 
 router.get('/prompts', ctrl.getPrompts);
 router.put('/prompts/:proyectoId', ctrl.savePrompt);
