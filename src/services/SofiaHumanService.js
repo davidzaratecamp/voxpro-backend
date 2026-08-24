@@ -318,7 +318,7 @@ class SofiaHumanService {
     }
 
     if (!row) {
-      const id = await this._upsertContinuation(existing?.id, { bot_call_id: botCallId, status: 'not_found' });
+      const id = await this._upsertContinuation(existing?.id, { bot_call_id: botCallId, client_code: clientCode, status: 'not_found' });
       return db('sofia_continuation_audits').where({ id }).first();
     }
 
