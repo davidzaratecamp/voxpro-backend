@@ -60,12 +60,19 @@ class VoicebotService {
         conditions.push(`telefono ILIKE $${params.length}`);
       }
 
+      // LIMIT 500 truncaba a "las 500 más recientes" en vez de "todo lo del
+      // rango pedido" — con el volumen actual (~450-500 llamadas/día por
+      // campaña), un rango de más de 1-2 días ya perdía los días más
+      // viejos por completo (se veían 0 resultados al filtrar por puntaje
+      // si justo esos días recientes aún no estaban auditados). El filtro
+      // real es fecha BETWEEN — este límite es solo una válvula de
+      // seguridad para no traer un rango absurdamente amplio sin querer.
       const result = await pgClient.query(
         `SELECT proyecto_id, call_id, fecha, hora, hangup_reason, duracion, telefono, call_analysis
          FROM v_voicebot_result
          WHERE ${conditions.join(' AND ')}
          ORDER BY fecha DESC, hora DESC
-         LIMIT 500`,
+         LIMIT 20000`,
         params
       );
 
