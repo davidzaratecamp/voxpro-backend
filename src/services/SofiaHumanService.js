@@ -298,14 +298,16 @@ class SofiaHumanService {
       const pgClient = await this._connect();
       try {
         const result = await pgClient.query(
-          `SELECT registro_llamada_id, proyecto_id, registro_llamada_fecha, registro_llamada_hora,
-                  registro_llamada_fono, agente_id, time_speaking, audiofile,
-                  json_data->>'agente' AS agente_nombre_bot
-           FROM registro_llamada
-           WHERE proyecto_id = ANY($1::int[]) AND registro_llamada_fono = $2
-             AND registro_llamada_fecha = $3 AND registro_llamada_hora > $4
-             AND time_speaking > 0
-           ORDER BY registro_llamada_hora ASC
+          `SELECT rl.registro_llamada_id, rl.proyecto_id, rl.registro_llamada_fecha, rl.registro_llamada_hora,
+                  rl.registro_llamada_fono, rl.agente_id, rl.time_speaking, rl.audiofile,
+                  rl.json_data->>'agente' AS agente_nombre_bot,
+                  rl.nomenclatura_id, tc.nomenclatura_nombre, tc.contacto_efectivo
+           FROM registro_llamada rl
+           LEFT JOIN tipo_contacto tc ON tc.nomenclatura_id = rl.nomenclatura_id
+           WHERE rl.proyecto_id = ANY($1::int[]) AND rl.registro_llamada_fono = $2
+             AND rl.registro_llamada_fecha = $3 AND rl.registro_llamada_hora > $4
+             AND rl.time_speaking > 0
+           ORDER BY rl.registro_llamada_hora ASC
            LIMIT 1`,
           [proyectoIds, telefono, fecha, hora]
         );
@@ -335,6 +337,9 @@ class SofiaHumanService {
       hora: call.hora,
       duracion: call.duracion,
       audiofile: call.audiofile,
+      nomenclatura_id: row.nomenclatura_id || null,
+      nomenclatura_nombre: row.nomenclatura_nombre || null,
+      contacto_efectivo: row.contacto_efectivo || null,
     };
 
     if (!call.audiofile) {
@@ -424,6 +429,74 @@ class SofiaHumanService {
     await db('sofia_continuation_audits').insert(row).onConflict('bot_call_id').merge();
     const saved = await db('sofia_continuation_audits').where({ bot_call_id: row.bot_call_id }).first();
     return saved.id;
+  }
+
+  /**
+   * Resultado comercial de las transferencias — funnel (transferencias →
+   * contacto → contacto efectivo → venta), distribución de motivos,
+   * ranking de agentes y tendencia diaria. Todo contra
+   * sofia_continuation_audits (ya trae la tipificación denormalizada
+   * desde tipo_contacto — sin volver a tocar Postgres).
+   */
+  async getCommercialStats({ clientCodes, dateFrom, dateTo }) {
+    const base = () => {
+      const q = db('sofia_continuation_audits').whereIn('client_code', clientCodes);
+      if (dateFrom) q.where('fecha', '>=', dateFrom);
+      if (dateTo) q.where('fecha', '<=', dateTo);
+      return q;
+    };
+
+    const [{ c: totalTransferencias }] = await base().select(db.raw('COUNT(*) as c'));
+    const [{ c: totalContacto }] = await base()
+      .whereNotNull('contacto_efectivo')
+      .whereNot('contacto_efectivo', 'No contacto')
+      .select(db.raw('COUNT(*) as c'));
+    const [{ c: totalEfectivo }] = await base()
+      .where('contacto_efectivo', 'Contacto Efectivo')
+      .select(db.raw('COUNT(*) as c'));
+    const [{ c: totalVentas }] = await base()
+      .where('nomenclatura_id', 'UP')
+      .select(db.raw('COUNT(*) as c'));
+
+    const distribucion = await base()
+      .whereNotNull('nomenclatura_nombre')
+      .select('nomenclatura_nombre')
+      .select(db.raw('COUNT(*) as total'))
+      .groupBy('nomenclatura_nombre')
+      .orderBy('total', 'desc');
+
+    const ranking = await base()
+      .whereNotNull('agente_id')
+      .select('agente_id')
+      .select(db.raw('MAX(agente_nombre) as agente_nombre'))
+      .select(db.raw('COUNT(*) as transferencias'))
+      .select(db.raw("SUM(CASE WHEN contacto_efectivo='Contacto Efectivo' THEN 1 ELSE 0 END) as contacto_efectivo"))
+      .select(db.raw("SUM(CASE WHEN nomenclatura_id='UP' THEN 1 ELSE 0 END) as ventas"))
+      .select(db.raw('ROUND(AVG(score), 1) as score_promedio'))
+      .groupBy('agente_id')
+      .orderBy('ventas', 'desc')
+      .limit(100);
+
+    const tendencia = await base()
+      .whereNotNull('fecha')
+      .select('fecha')
+      .select(db.raw('COUNT(*) as transferencias'))
+      .select(db.raw("SUM(CASE WHEN contacto_efectivo='Contacto Efectivo' THEN 1 ELSE 0 END) as contacto_efectivo"))
+      .select(db.raw("SUM(CASE WHEN nomenclatura_id='UP' THEN 1 ELSE 0 END) as ventas"))
+      .groupBy('fecha')
+      .orderBy('fecha', 'asc');
+
+    return {
+      funnel: {
+        transferencias: totalTransferencias,
+        contacto: totalContacto,
+        contacto_efectivo: totalEfectivo,
+        ventas: totalVentas,
+      },
+      distribucion,
+      ranking,
+      tendencia,
+    };
   }
 
   /**

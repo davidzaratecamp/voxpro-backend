@@ -76,6 +76,23 @@ exports.listSelections = asyncHandler(async (req, res) => {
   res.json({ data, count: data.length });
 });
 
+// GET /api/sofia-human/commercial-stats?date_from=&date_to=&client_code=
+exports.getCommercialStats = asyncHandler(async (req, res) => {
+  const { date_from, date_to, client_code } = req.query;
+  const allowed = resolveAllowedClientCodes(req.user);
+
+  let clientCodes;
+  if (client_code) {
+    assertClientAccess(req, client_code);
+    clientCodes = [client_code];
+  } else {
+    clientCodes = allowed === null ? CLIENT_CODES : allowed;
+  }
+
+  const data = await SofiaHumanService.getCommercialStats({ clientCodes, dateFrom: date_from, dateTo: date_to });
+  res.json({ data });
+});
+
 // POST /api/sofia-human/select { registro_llamada_id, proyecto_id }
 exports.select = asyncHandler(async (req, res) => {
   const proyectoId = Number(req.body.proyecto_id);
