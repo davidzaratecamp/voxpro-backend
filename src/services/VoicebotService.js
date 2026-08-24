@@ -82,8 +82,11 @@ class VoicebotService {
   }
 
   /**
-   * Agrega el puntaje de auditoría IA y la señal de "transferencia perdida"
-   * (si existen), consultando la tabla local voicebot_call_audits en un solo query.
+   * Agrega el puntaje de auditoría IA, la señal de "transferencia perdida"
+   * (voicebot_call_audits) y el puntaje de la continuación humana
+   * (sofia_continuation_audits) — tres puntajes distintos por caso: el del
+   * bot, el de coherencia del resumen (ya viene en el propio audit) y el
+   * del agente humano. Un solo query adicional, misma tabla local.
    */
   async _attachScores(calls) {
     if (!calls.length) return calls;
@@ -92,13 +95,21 @@ class VoicebotService {
       .whereIn('call_id', callIds)
       .select('call_id', 'score', 'missed_transfer', 'missed_transfer_reason');
     const auditMap = new Map(audits.map((a) => [a.call_id, a]));
+
+    const continuations = await db('sofia_continuation_audits')
+      .whereIn('bot_call_id', callIds)
+      .select('bot_call_id', 'score', 'status');
+    const contMap = new Map(continuations.map((c) => [c.bot_call_id, c]));
+
     return calls.map((c) => {
       const a = auditMap.get(c.call_id);
+      const cont = contMap.get(c.call_id);
       return {
         ...c,
         ai_score: a ? a.score : null,
         missed_transfer: a ? !!a.missed_transfer : false,
         missed_transfer_reason: a ? a.missed_transfer_reason : null,
+        agente_score: cont && cont.status === 'scored' ? cont.score : null,
       };
     });
   }
