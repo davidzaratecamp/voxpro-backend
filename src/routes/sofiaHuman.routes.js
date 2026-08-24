@@ -1,9 +1,11 @@
 const router = require('express').Router();
 const ctrl = require('../controllers/sofiaHuman.controller');
 
-// Solo supervisor_calidad o gestor_usuarios pueden acceder
+// supervisor_calidad/gestor_usuarios (auditan al agente humano) y auditor_ia
+// (auditan al bot, también necesitan ver el resultado comercial de sus
+// transferencias) — cada uno queda igual acotado por sus client_codes.
 router.use((req, res, next) => {
-  if (!['supervisor_calidad', 'gestor_usuarios'].includes(req.user?.role)) {
+  if (!['supervisor_calidad', 'gestor_usuarios', 'auditor_ia'].includes(req.user?.role)) {
     return res.status(403).json({ error: true, message: 'Acceso restringido a supervisores de calidad' });
   }
   next();
