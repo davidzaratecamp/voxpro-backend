@@ -4,6 +4,7 @@ const ScannerService = require('../services/ScannerService');
 const ZoomScannerService = require('../services/ZoomScannerService');
 const AuditService = require('../services/AuditService');
 const VoicebotAuditRunner = require('../services/VoicebotAuditRunner');
+const pushPrismaSnapshot = require('./pushPrismaSnapshot');
 const db = require('../database/connection');
 const logger = require('../utils/logger');
 
@@ -11,6 +12,7 @@ let scanTask = null;
 let zoomTodayTask = null;
 let cleanupTask = null;
 let voicebotAuditTask = null;
+let prismaSnapshotTask = null;
 
 function start() {
   const schedule = config.scan.cronSchedule;
@@ -102,6 +104,13 @@ function start() {
     }
   });
 
+  // Empuja el snapshot de calidad IA de SOFIA al panel de Prisma cada 20 min.
+  if (process.env.PRISMA_SNAPSHOT_URL && process.env.PRISMA_ANALYTICS_TOKEN) {
+    prismaSnapshotTask = cron.schedule('*/20 * * * *', pushPrismaSnapshot);
+    pushPrismaSnapshot(); // primer envío al arrancar
+    logger.info('Scheduler: push de snapshot a Prisma activado (cada 20min)');
+  }
+
   logger.info(`Scheduler iniciado - job diario programado: ${schedule}`);
 }
 
@@ -121,6 +130,10 @@ function stop() {
   if (voicebotAuditTask) {
     voicebotAuditTask.stop();
     voicebotAuditTask = null;
+  }
+  if (prismaSnapshotTask) {
+    prismaSnapshotTask.stop();
+    prismaSnapshotTask = null;
   }
   logger.info('Scheduler detenido');
 }
