@@ -48,8 +48,13 @@ router.get(
       .limit(20);
 
     // Continuación humana: score del asesor contra la matriz de calidad real.
+    // OJO: sofia_continuation_audits.proyecto_id es la cola HUMANA (7/9/10/11) o
+    // NULL; el campo estable es client_code.
+    const clientCodes = proyectoIds
+      .map((id) => (id === 12 ? 'claro_hogar' : id === 13 ? 'claro_tyt' : null))
+      .filter(Boolean);
     const cont = await db('sofia_continuation_audits')
-      .whereIn('proyecto_id', proyectoIds)
+      .whereIn('client_code', clientCodes)
       .where('created_at', '>=', since)
       .select('status', 'score', 'high_impact_failed', 'agente_id', 'agente_nombre');
 
