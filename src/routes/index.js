@@ -18,6 +18,9 @@ router.use('/daily-analysis', auth, require('./dailyAnalysis.routes'));
 router.use('/voicebot', auth, require('./voicebot.routes'));
 router.use('/sofia-human', auth, require('./sofiaHuman.routes'));
 
+// Analítica de solo lectura para Prisma (token de servicio propio, sin JWT).
+router.use('/prisma-analytics', require('./prismaAnalytics.routes'));
+
 // Health check
 router.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
