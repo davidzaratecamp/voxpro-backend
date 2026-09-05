@@ -203,18 +203,27 @@ class SantiService {
 
       for (const row of pending) {
         try {
-          const fechaStr = toDateStr(row.fecha_excel);
+          // El emparejamiento NO es por fecha: `Fecha_Llegada` del Excel es
+          // cuando el contacto entró al sistema, no la fecha de la llamada
+          // real (un mismo teléfono puede tener decenas de intentos en días
+          // distintos, ver `Intentos`). Lo confirmado contra Aware es que
+          // `Agente_Id` del Excel SÍ coincide siempre con el agente real que
+          // tuvo la llamada efectiva — ese es el emparejamiento correcto.
+          if (!row.agente_id_excel) {
+            await db('santi_audits').where('id', row.id).update({ status: 'error', error_message: 'Fila del Excel sin Agente_Id — no se puede emparejar sin fecha confiable' });
+            continue;
+          }
           const result = await pgClient.query(
             `SELECT rl.registro_llamada_id, rl.agente_id::text AS agent_id, e.empleado_name AS agent_name,
                     rl.call_time AS duration, rl.registro_llamada_fecha AS file_date,
                     rl.proyecto_id, rl.call_id
              FROM registro_llamada rl
              LEFT JOIN empleado e ON rl.agente_id = e.empleado_rut
-             WHERE rl.registro_llamada_fono = $1 AND rl.registro_llamada_fecha = $2::date
+             WHERE rl.registro_llamada_fono = $1 AND rl.agente_id::text = $2
                AND rl.call_time > 0 AND rl.call_id > 0
              ORDER BY rl.registro_llamada_id DESC
              LIMIT 1`,
-            [row.phone, fechaStr]
+            [row.phone, row.agente_id_excel]
           );
           const hit = result.rows[0];
           if (!hit) {
@@ -227,7 +236,7 @@ class SantiService {
           }
           matched.push({ row, hit });
         } catch (err) {
-          logger.error(`Santi: error buscando ${row.phone}/${row.fecha_excel}`, err);
+          logger.error(`Santi: error buscando ${row.phone}/agente ${row.agente_id_excel}`, err);
           await db('santi_audits').where('id', row.id).update({ status: 'error', error_message: err.message?.slice(0, 500) || 'error de consulta' });
         }
       }
@@ -262,7 +271,7 @@ class SantiService {
           file_name: audioUrl.split('/').pop(),
           file_path: audioUrl,
           file_path_hash: pathHash,
-          file_date: toDateStr(row.fecha_excel),
+          file_date: toDateStr(hit.file_date),
           agent_id: hit.agent_id,
           agent_name: hit.agent_name,
           call_duration: hit.duration,
@@ -279,7 +288,7 @@ class SantiService {
       if (existingSelection) {
         selectionId = existingSelection.id;
       } else {
-        const { weekStart, weekEnd } = getWeekBounds(row.fecha_excel);
+        const { weekStart, weekEnd } = getWeekBounds(hit.file_date);
         [selectionId] = await db('audit_selections').insert({
           recording_id: recordingId,
           agent_id: hit.agent_id,
