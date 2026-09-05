@@ -5,6 +5,7 @@ const ZoomScannerService = require('../services/ZoomScannerService');
 const AuditService = require('../services/AuditService');
 const VoicebotAuditRunner = require('../services/VoicebotAuditRunner');
 const pushPrismaSnapshot = require('./pushPrismaSnapshot');
+const SantiAuditRunner = require('../services/SantiAuditRunner');
 const db = require('../database/connection');
 const logger = require('../utils/logger');
 
@@ -13,6 +14,7 @@ let zoomTodayTask = null;
 let cleanupTask = null;
 let voicebotAuditTask = null;
 let prismaSnapshotTask = null;
+let santiAuditTask = null;
 
 function start() {
   const schedule = config.scan.cronSchedule;
@@ -111,6 +113,17 @@ function start() {
     logger.info('Scheduler: push de snapshot a Prisma activado (cada 20min)');
   }
 
+  // Job de auditoría "Santiago" (outbound masivo por lista de teléfonos importada
+  // de Excel): revisa cada minuto si hay filas pendientes en santi_audits y
+  // audita un lote. No hace nada si no hay pendientes (no requiere switch).
+  santiAuditTask = cron.schedule('* * * * *', async () => {
+    try {
+      await SantiAuditRunner.runPendingBatch();
+    } catch (err) {
+      logger.error('Job santi-audit: error', err);
+    }
+  });
+
   logger.info(`Scheduler iniciado - job diario programado: ${schedule}`);
 }
 
@@ -134,6 +147,10 @@ function stop() {
   if (prismaSnapshotTask) {
     prismaSnapshotTask.stop();
     prismaSnapshotTask = null;
+  }
+  if (santiAuditTask) {
+    santiAuditTask.stop();
+    santiAuditTask = null;
   }
   logger.info('Scheduler detenido');
 }

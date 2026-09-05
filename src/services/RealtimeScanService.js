@@ -566,3 +566,5 @@ module.exports = new RealtimeScanService();
 module.exports.downloadBuffer = downloadBuffer;
 module.exports.downloadBufferViaTunnel = downloadBufferViaTunnel;
 module.exports.httpsAgent = httpsAgent;
+module.exports.openTunnel = openTunnel;
+module.exports.buildStandardAudioUrl = buildStandardAudioUrl;
