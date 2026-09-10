@@ -175,7 +175,7 @@ class AnalysisService {
       : null;
     const { transcription, evaluation } = await GeminiService.analyzeCall(
       audioBuffer,
-      selection.client_code,
+      selection.client_code === 'claro_tyt' ? 'claro_tyt_outbound' : selection.client_code,
       selection.agent_id,
       selection.proyecto_id,
       mimeType,

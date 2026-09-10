@@ -70,14 +70,16 @@ async function resolveCampaignKey(clientCode, agentId, proyectoId) {
     if (WCB_MOVIL_IDS.has(proyectoId)) return 'claro_movil';
     if (WCB_PYMES_IDS.has(proyectoId)) return 'claro_pymes';
   }
-  if (clientCode === 'claro_tyt' && proyectoId != null) {
-    // 10/11 = "Inb T&T IA"/"Inb T&T IA 2", las colas humanas donde aterrizan
-    // las transferencias de SOFIA (ver voicebotSource.js humanProyectos) —
-    // cualquier otro proyecto_id es la campaña outbound estándar (AWARE_8).
-    const TYT_INBOUND_HUMAN_IDS = new Set([10, 11]);
-    return TYT_INBOUND_HUMAN_IDS.has(proyectoId) ? 'claro_tyt_inbound' : 'claro_tyt_outbound';
-  }
-  return clientCode; // claro_wcb, claro_hogar, claro_tyt (fallback), claro_movil, claro_pymes
+  // claro_tyt_inbound/claro_tyt_outbound NO se resuelven aquí por proyecto_id:
+  // AWARE_8 (outbound) tiene sus propios proyectos con id 10 y 11 (¡195k
+  // registros en el 11!), que chocan por casualidad con los ids 10/11 de las
+  // colas humanas de SOFIA en la otra base (awareccm/inbound) — son bases de
+  // datos físicas distintas con numeración independiente. El campaign_key
+  // correcto ("claro_tyt_inbound" o "claro_tyt_outbound") lo decide quien
+  // llama a analyzeCall, según de qué flujo viene (ver SofiaHumanService vs
+  // AnalysisService), y se pasa directo como `clientCode` — por eso cae aquí
+  // sin transformar, en el return genérico de abajo.
+  return clientCode; // claro_wcb, claro_hogar, claro_tyt_inbound, claro_tyt_outbound, claro_movil, claro_pymes
 }
 
 // Modelos de respaldo en orden de preferencia.

@@ -372,7 +372,7 @@ class SofiaHumanService {
 
       const { transcription, evaluation } = await GeminiService.analyzeCall(
         audioBuffer,
-        clientCode,
+        clientCode === 'claro_tyt' ? 'claro_tyt_inbound' : clientCode,
         call.agente_id,
         call.proyecto_id,
         'audio/ogg',
@@ -763,7 +763,7 @@ class SofiaHumanService {
 
     const { transcription, evaluation } = await GeminiService.analyzeCall(
       audioBuffer,
-      selection.client_code,
+      selection.client_code === 'claro_tyt' ? 'claro_tyt_inbound' : selection.client_code,
       selection.agente_id,
       selection.proyecto_id,
       'audio/ogg',
