@@ -70,7 +70,14 @@ async function resolveCampaignKey(clientCode, agentId, proyectoId) {
     if (WCB_MOVIL_IDS.has(proyectoId)) return 'claro_movil';
     if (WCB_PYMES_IDS.has(proyectoId)) return 'claro_pymes';
   }
-  return clientCode; // claro_wcb, claro_hogar, claro_tyt, claro_movil, claro_pymes
+  if (clientCode === 'claro_tyt' && proyectoId != null) {
+    // 10/11 = "Inb T&T IA"/"Inb T&T IA 2", las colas humanas donde aterrizan
+    // las transferencias de SOFIA (ver voicebotSource.js humanProyectos) —
+    // cualquier otro proyecto_id es la campaña outbound estándar (AWARE_8).
+    const TYT_INBOUND_HUMAN_IDS = new Set([10, 11]);
+    return TYT_INBOUND_HUMAN_IDS.has(proyectoId) ? 'claro_tyt_inbound' : 'claro_tyt_outbound';
+  }
+  return clientCode; // claro_wcb, claro_hogar, claro_tyt (fallback), claro_movil, claro_pymes
 }
 
 // Modelos de respaldo en orden de preferencia.
