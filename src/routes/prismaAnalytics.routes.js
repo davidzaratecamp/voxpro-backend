@@ -21,10 +21,18 @@ router.use((req, res, next) => {
 });
 
 // GET /api/prisma-analytics/sofia-quality?days=30&proyectos=12,13
+// GET /api/prisma-analytics/sofia-quality?from=2026-09-10&to=2026-09-10&proyectos=12
 router.get(
   '/sofia-quality',
   asyncHandler(async (req, res) => {
-    res.json(await SofiaQualityService.getQuality({ days: req.query.days, proyectos: req.query.proyectos }));
+    res.json(
+      await SofiaQualityService.getQuality({
+        days: req.query.days,
+        from: req.query.from,
+        to: req.query.to,
+        proyectos: req.query.proyectos,
+      }),
+    );
   }),
 );
 

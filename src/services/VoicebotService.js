@@ -305,22 +305,33 @@ class VoicebotService {
   // ── Estadísticas agregadas para el dashboard de "Análisis gráfico" ────────
 
   /**
-   * Totales de llamadas y desglose por hangup_reason, por proyecto, en los
-   * últimos `days` días (fuente: v_voicebot_result en Postgres).
+   * Resuelve el rango [from, to] ('YYYY-MM-DD') a partir de `days` (trailing
+   * desde hoy) o de un `from`/`to` explícito, para que el panel de Prisma
+   * pueda pedir un día, mes o rango concreto en vez de solo "últimos N días".
    */
-  async _getCallTotals(days, proyectoIds) {
+  _resolveRange(days, from, to) {
+    if (from && to) return [from, to];
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - (days || 30));
+    return [start.toISOString().slice(0, 10), end.toISOString().slice(0, 10)];
+  }
+
+  /**
+   * Totales de llamadas y desglose por hangup_reason, por proyecto, en el
+   * rango [from, to] (fuente: v_voicebot_result en Postgres).
+   */
+  async _getCallTotals({ days, from, to, proyectoIds }) {
     const pgClient = await this._connect();
     try {
-      const since = new Date();
-      since.setDate(since.getDate() - days);
-      const sinceStr = since.toISOString().slice(0, 10);
+      const [fromStr, toStr] = this._resolveRange(days, from, to);
 
       const result = await pgClient.query(
         `SELECT proyecto_id, hangup_reason, COUNT(*) as count
          FROM v_voicebot_result
-         WHERE proyecto_id = ANY($1::int[]) AND fecha >= $2
+         WHERE proyecto_id = ANY($1::int[]) AND fecha BETWEEN $2 AND $3
          GROUP BY proyecto_id, hangup_reason`,
-        [proyectoIds, sinceStr]
+        [proyectoIds, fromStr, toStr]
       );
       return result.rows.map((r) => ({
         proyecto_id: r.proyecto_id,
@@ -334,19 +345,21 @@ class VoicebotService {
 
   /**
    * Estadísticas de puntaje (promedio, distribución, tendencia diaria) desde
-   * voicebot_call_audits en MySQL. Se calcula en JS sobre el set ya acotado
-   * a `days` días — nunca son más de unos cientos de filas.
+   * voicebot_call_audits en MySQL. Acepta `days` (trailing desde hoy) o un
+   * `from`/`to` explícito (día, mes o rango concreto que haya elegido el
+   * usuario en Prisma) — se calcula en JS sobre el set ya acotado, nunca son
+   * más de unos cientos/miles de filas.
    */
-  async getStats({ days = 30, proyectoIds } = {}) {
+  async getStats({ days = 30, from, to, proyectoIds } = {}) {
     const ids = proyectoIds && proyectoIds.length ? proyectoIds : PROYECTO_IDS;
-    const since = new Date();
-    since.setDate(since.getDate() - days);
+    const [fromStr, toStr] = this._resolveRange(days, from, to);
 
     const [totalsByReason, audits] = await Promise.all([
-      this._getCallTotals(days, ids),
+      this._getCallTotals({ from: fromStr, to: toStr, proyectoIds: ids }),
       db('voicebot_call_audits')
         .whereIn('proyecto_id', ids)
-        .where('created_at', '>=', since)
+        .where('created_at', '>=', `${fromStr} 00:00:00`)
+        .andWhere('created_at', '<=', `${toStr} 23:59:59`)
         .select('proyecto_id', 'score', 'missed_transfer', db.raw('DATE(created_at) as audit_date')),
     ]);
 

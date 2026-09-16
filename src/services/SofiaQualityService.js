@@ -1,27 +1,45 @@
 const VoicebotService = require('./VoicebotService');
 const db = require('../database/connection');
 
+const YMD = /^\d{4}-\d{2}-\d{2}$/;
+
 /**
  * Compila los resultados de auditoría IA de SOFIA (score del bot, oportunidad
  * perdida, score del asesor humano en la continuación + nombres). Lo consume el
  * endpoint /api/prisma-analytics/sofia-quality y el job que empuja el snapshot
  * a Prisma.
+ *
+ * Acepta `days` (trailing desde hoy, comportamiento histórico — lo sigue
+ * usando el push del snapshot cada 20 min) o un `from`/`to` explícito
+ * ('YYYY-MM-DD'), que es lo que usa Prisma cuando llama en vivo para
+ * respetar el día/mes/rango que haya elegido el usuario en el panel.
  */
-async function getQuality({ days = 30, proyectos } = {}) {
+async function getQuality({ days = 30, from, to, proyectos } = {}) {
   const d = Math.min(180, Math.max(1, Number(days) || 30));
   const requested = Array.isArray(proyectos)
     ? proyectos
     : String(proyectos || '12,13').split(',').map(Number);
   const proyectoIds = requested.filter((n) => n === 12 || n === 13);
   const ids = proyectoIds.length ? proyectoIds : [12, 13];
-  const since = new Date();
-  since.setDate(since.getDate() - d);
 
-  const bot = await VoicebotService.getStats({ days: d, proyectoIds: ids });
+  let fromStr, toStr;
+  if (YMD.test(from) && YMD.test(to)) {
+    [fromStr, toStr] = from <= to ? [from, to] : [to, from];
+  } else {
+    const end = new Date();
+    const start = new Date();
+    start.setDate(start.getDate() - d);
+    fromStr = start.toISOString().slice(0, 10);
+    toStr = end.toISOString().slice(0, 10);
+  }
+  const rangeDays = Math.round((new Date(`${toStr}T00:00:00Z`) - new Date(`${fromStr}T00:00:00Z`)) / 86400000) + 1;
+
+  const bot = await VoicebotService.getStats({ from: fromStr, to: toStr, proyectoIds: ids });
 
   const missedReasons = await db('voicebot_call_audits')
     .whereIn('proyecto_id', ids)
-    .where('created_at', '>=', since)
+    .where('created_at', '>=', `${fromStr} 00:00:00`)
+    .andWhere('created_at', '<=', `${toStr} 23:59:59`)
     .where('missed_transfer', true)
     .whereNotNull('missed_transfer_reason')
     .select('missed_transfer_reason')
@@ -29,13 +47,14 @@ async function getQuality({ days = 30, proyectos } = {}) {
     .limit(20);
 
   // sofia_continuation_audits.proyecto_id es la cola HUMANA (7/9/10/11) o NULL;
-  // el campo estable es client_code.
+  // el campo estable es client_code. Se filtra por `fecha` (la fecha REAL de
+  // la llamada, no cuándo se auditó) — más preciso que created_at.
   const clientCodes = ids
     .map((id) => (id === 12 ? 'claro_hogar' : id === 13 ? 'claro_tyt' : null))
     .filter(Boolean);
   const cont = await db('sofia_continuation_audits')
     .whereIn('client_code', clientCodes)
-    .where('created_at', '>=', since)
+    .whereBetween('fecha', [fromStr, toStr])
     .select('status', 'score', 'high_impact_failed', 'agente_id', 'agente_nombre');
 
   const h = { total: cont.length, scored: 0, not_found: 0, error: 0, hi_failed: 0, sum: 0, low: 0, mid: 0, high: 0 };
@@ -63,7 +82,8 @@ async function getQuality({ days = 30, proyectos } = {}) {
 
   return {
     generated_at: new Date().toISOString(),
-    range_days: d,
+    range_days: rangeDays,
+    range: { from: fromStr, to: toStr },
     proyectos: ids,
     bot, // { by_proyecto: [...], trend: [...] }
     human: {
