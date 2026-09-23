@@ -10,9 +10,10 @@ const VALID_ROLES = [
   'gestor_usuarios',
   'coordinador_avaya',
   'auditor_ia',
+  'auditor_obama_vital',
 ];
 
-const VALID_CLIENT_CODES = ['obama', 'claro_wcb', 'claro_hogar', 'claro_tyt', 'lv'];
+const VALID_CLIENT_CODES = ['obama', 'claro_wcb', 'claro_hogar', 'claro_tyt', 'lv', 'obama_vital'];
 
 function requireGestor(req, res, next) {
   if (req.user?.role !== 'gestor_usuarios') {
