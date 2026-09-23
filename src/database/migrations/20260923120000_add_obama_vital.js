@@ -21,6 +21,9 @@ const ROLES_BEFORE = [
 ];
 const ROLES_AFTER = [...ROLES_BEFORE, 'auditor_obama_vital'];
 
+// mysql2 devuelve las columnas JSON ya parseadas: hay que volver a serializar.
+const asJson = (v) => (typeof v === 'string' ? v : JSON.stringify(v));
+
 const enumSql = (roles) =>
   `ALTER TABLE users MODIFY COLUMN role ENUM(${roles.map((r) => `'${r}'`).join(',')}) NOT NULL`;
 
@@ -46,7 +49,10 @@ const FALLBACK = {
 exports.up = async function (knex) {
   await knex.raw(enumSql(ROLES_AFTER));
 
-  await knex.schema.createTable('obama_vital_audits', (t) => {
+  // Idempotente: un primer intento falló después de crear la tabla (MySQL no
+  // revierte DDL), así que no se vuelve a crear si ya existe.
+  const hasTable = await knex.schema.hasTable('obama_vital_audits');
+  if (!hasTable) await knex.schema.createTable('obama_vital_audits', (t) => {
     t.bigIncrements('id').primary();
     t.integer('registro_llamada_id').notNullable().unique();
     t.integer('proyecto_id').notNullable();
@@ -87,9 +93,9 @@ exports.up = async function (knex) {
       campaign_key:         m.campaign_key,
       client_group:         'obama_vital',
       campaign_label:       m.campaign_label,
-      general_criteria:     source ? source.general_criteria : JSON.stringify(FALLBACK.general),
-      high_impact_criteria: source ? source.high_impact_criteria : JSON.stringify(FALLBACK.highImpact),
-      na_rules:             source ? source.na_rules : JSON.stringify(FALLBACK.naRules),
+      general_criteria:     asJson(source ? source.general_criteria : FALLBACK.general),
+      high_impact_criteria: asJson(source ? source.high_impact_criteria : FALLBACK.highImpact),
+      na_rules:             asJson(source ? source.na_rules : FALLBACK.naRules),
       special_instructions: source ? source.special_instructions : null,
       updated_by:           null,
     });
