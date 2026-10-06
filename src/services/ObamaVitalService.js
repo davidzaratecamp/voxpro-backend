@@ -29,10 +29,6 @@ function httpError(statusCode, message) {
   return err;
 }
 
-function toDateStr(v) {
-  return v instanceof Date ? v.toISOString().slice(0, 10) : String(v).slice(0, 10);
-}
-
 /** Archivos temporales con nombre único — varias conversiones pueden correr a la vez. */
 function tmpFile(prefix, ext) {
   return path.join(os.tmpdir(), `${prefix}_${crypto.randomUUID()}.${ext}`);
@@ -51,12 +47,57 @@ async function convertAudio(rawBuffer, ffmpegArgs, outExt) {
   }
 }
 
-// Solo las columnas necesarias: json_data trae datos sensibles del asegurado
-// (correo, dirección, respuesta de seguridad) que no deben salir de Aware.
-const CALL_COLUMNS = `
-  registro_llamada_id, proyecto_id, registro_llamada_fecha, registro_llamada_hora,
-  registro_llamada_fono, agente_id, time_speaking, audiofile,
-  json_data->>'agente' AS agente_nombre`;
+/**
+ * Fuente de llamadas: los registros de la central (cdr_custom), NO solo
+ * registro_llamada. Aware deja en registro_llamada un único registro por
+ * contacto de la base (el último intento): si el agente llama 2-3 veces al
+ * mismo cliente, los intentos anteriores quedan grabados pero solo existen en
+ * el CDR — en oct-2026 eran ~40% de las llamadas contestadas, incluidas
+ * llamadas de más de una hora (ej. Laura Ladino, 5-oct, 71 min).
+ *
+ * - Una fila por llamada (DISTINCT ON uniqueid), grabada, del marcador
+ *   (outbound) y de la cola (inbound): todas las de registro_llamada más los
+ *   intentos no registrados que fueron contestados.
+ * - Campaña: la del CDR; si no está, la de cdr_aware; si es entrante sin
+ *   registro, la de otra llamada de la misma cola.
+ * - Solo columnas necesarias: json_data trae datos sensibles del asegurado
+ *   (correo, dirección, respuesta de seguridad) que no deben salir de Aware.
+ */
+function callsSql(where) {
+  return `
+    WITH base AS (
+      SELECT DISTINCT ON (cu.uniqueid)
+             cu.uniqueid, cu.registro_llamada_id, cu.context, cu.cola, cu.call_start, cu.billsec,
+             cu.audiofile, cu.telefono, NULLIF(cu.agente_id, '') AS cdr_agente,
+             split_part(CASE WHEN cu.context = 'aware-cola-inbound' THEN cu.dstchannel ELSE cu.channel END, '-', 1) AS ext,
+             NULLIF(cu.proyecto_id, 0) AS cdr_proyecto
+      FROM cdr_custom cu
+      WHERE ${where}
+        -- Todo lo que ya estaba en registro_llamada (como antes, aunque la
+        -- central lo marque "NO ANSWER": timbró sin contestar) + los intentos
+        -- no registrados que sí fueron conversación.
+        AND (cu.disposition = 'ANSWERED' OR cu.registro_llamada_id IS NOT NULL)
+        AND cu.billsec > 0 AND COALESCE(cu.audiofile, '') <> ''
+        AND cu.context IN ('racodialer-asistido', 'aware-cola-inbound')
+      -- Una misma llamada puede tener 2 filas (una ligada a registro_llamada
+      -- y otra no): se prefiere la registrada.
+      ORDER BY cu.uniqueid, (cu.registro_llamada_id IS NOT NULL) DESC, cu.id DESC
+    )
+    SELECT b.uniqueid, b.registro_llamada_id, b.context, b.billsec, b.audiofile, b.telefono, b.cdr_agente, b.ext,
+           b.call_start::text AS inicio,
+           COALESCE(
+             b.cdr_proyecto,
+             (SELECT MAX(ca.proyecto_id) FROM cdr_aware ca WHERE ca.uniqueid = b.uniqueid AND ca.proyecto_id > 0),
+             (SELECT x.proyecto_id FROM cdr_custom x WHERE b.cola <> '' AND x.cola = b.cola AND x.proyecto_id > 0 ORDER BY x.id DESC LIMIT 1)
+           ) AS proyecto_id,
+           rl.agente_id AS rl_agente,
+           rl.json_data->>'agente' AS rl_nombre
+    FROM base b
+    LEFT JOIN registro_llamada rl ON rl.registro_llamada_id = b.registro_llamada_id`;
+}
+
+const cleanName = (n) => (n ? n.replace(/\s+/g, ' ').trim() : null);
+const toMs = (inicio) => new Date(String(inicio).replace(' ', 'T')).getTime();
 
 class ObamaVitalService {
   campaignForProyecto(proyectoId) {
@@ -77,25 +118,98 @@ class ObamaVitalService {
     return pgClient;
   }
 
-  _mapRow(row) {
-    const info = this.campaignForProyecto(row.proyecto_id);
-    return {
-      registro_llamada_id: row.registro_llamada_id,
-      proyecto_id: row.proyecto_id,
-      proyecto_nombre: info?.proyectoName || null,
-      campaign: info?.campaign || null,
-      fecha: toDateStr(row.registro_llamada_fecha),
-      hora: row.registro_llamada_hora,
-      telefono: row.registro_llamada_fono,
-      agente_id: row.agente_id,
-      agente_nombre: row.agente_nombre ? row.agente_nombre.replace(/\s+/g, ' ').trim() : null,
-      duracion: row.time_speaking,
-      audiofile: row.audiofile,
-    };
-  }
-
   getAudioUrl(audiofile) {
     return `${source.audioBaseUrl}/${audiofile}.WAV`;
+  }
+
+  /**
+   * Lee llamadas del CDR y les resuelve el agente:
+   *  1. el de registro_llamada, si el intento quedó registrado;
+   *  2. el que trae el propio CDR;
+   *  3. el de la extensión: la llamada registrada más cercana en el tiempo
+   *     hecha desde esa misma extensión ese día (una extensión puede pasar
+   *     de un agente a otro en el día, por eso "la más cercana").
+   * Las que no se pueden atribuir a ningún agente se descartan.
+   */
+  async _fetchCalls(pgClient, where, params) {
+    const { rows } = await pgClient.query(callsSql(where), params);
+    if (!rows.length) return [];
+
+    const fechas = [...new Set(rows.map((r) => String(r.inicio).slice(0, 10)))];
+    const anchorsRes = await pgClient.query(
+      `SELECT split_part(CASE WHEN context = 'aware-cola-inbound' THEN dstchannel ELSE channel END, '-', 1) AS ext,
+              agente_id, call_start::text AS inicio
+       FROM cdr_custom
+       WHERE agente_id <> '' AND call_start::date = ANY($1::date[])`,
+      [fechas]
+    );
+    const anchorsByExt = new Map();
+    for (const a of anchorsRes.rows) {
+      if (!anchorsByExt.has(a.ext)) anchorsByExt.set(a.ext, []);
+      anchorsByExt.get(a.ext).push({ agente: a.agente_id, ms: toMs(a.inicio), dia: String(a.inicio).slice(0, 10) });
+    }
+    const agentByExt = (ext, inicio) => {
+      const t = toMs(inicio);
+      const dia = String(inicio).slice(0, 10);
+      let best = null;
+      for (const a of anchorsByExt.get(ext) || []) {
+        if (a.dia !== dia) continue;
+        if (!best || Math.abs(a.ms - t) < Math.abs(best.ms - t)) best = a;
+      }
+      return best?.agente || null;
+    };
+
+    const calls = [];
+    let sinAgente = 0;
+    for (const r of rows) {
+      const info = this.campaignForProyecto(r.proyecto_id);
+      if (!info) continue;
+      const agenteId = r.rl_agente || r.cdr_agente || agentByExt(r.ext, r.inicio);
+      if (!agenteId) { sinAgente++; continue; }
+      calls.push({
+        uniqueid: r.uniqueid,
+        registro_llamada_id: r.registro_llamada_id ? Number(r.registro_llamada_id) : null,
+        registrada: !!r.registro_llamada_id,
+        proyecto_id: Number(r.proyecto_id),
+        proyecto_nombre: info.proyectoName,
+        campaign: info.campaign,
+        fecha: String(r.inicio).slice(0, 10),
+        hora: String(r.inicio).slice(11, 19),
+        telefono: r.telefono,
+        agente_id: agenteId,
+        agente_nombre: cleanName(r.rl_nombre),
+        duracion: r.billsec,
+        audiofile: r.audiofile,
+      });
+    }
+    if (sinAgente) logger.warn(`ObamaVitalService: ${sinAgente} llamadas sin agente identificable (se omiten)`);
+
+    // Nombres de los agentes que no vienen de registro_llamada
+    const sinNombre = [...new Set(calls.filter((c) => !c.agente_nombre).map((c) => c.agente_id))];
+    if (sinNombre.length) {
+      const names = await pgClient.query(
+        `SELECT DISTINCT ON (agente_id) agente_id, json_data->>'agente' AS nombre
+         FROM registro_llamada WHERE agente_id = ANY($1::text[]) AND json_data->>'agente' IS NOT NULL
+         ORDER BY agente_id, registro_llamada_id DESC`,
+        [sinNombre]
+      );
+      const nameMap = new Map(names.rows.map((n) => [n.agente_id, cleanName(n.nombre)]));
+      for (const c of calls) if (!c.agente_nombre) c.agente_nombre = nameMap.get(c.agente_id) || null;
+    }
+    return calls;
+  }
+
+  /** Auditoría existente de cada llamada (por uniqueid o, en las viejas, por registro_llamada_id). */
+  async _auditsFor(calls) {
+    if (!calls.length) return { byUnique: new Map(), byRegistro: new Map() };
+    const audits = await db('obama_vital_audits')
+      .whereIn('uniqueid', calls.map((c) => c.uniqueid))
+      .orWhereIn('registro_llamada_id', calls.map((c) => c.registro_llamada_id).filter(Boolean))
+      .select('id', 'uniqueid', 'registro_llamada_id', 'status', 'score');
+    return {
+      byUnique: new Map(audits.filter((a) => a.uniqueid).map((a) => [a.uniqueid, a])),
+      byRegistro: new Map(audits.filter((a) => a.registro_llamada_id).map((a) => [a.registro_llamada_id, a])),
+    };
   }
 
   /**
@@ -103,46 +217,28 @@ class ObamaVitalService {
    * Cada una sale marcada con su auditoría si ya existe (una por llamada).
    */
   async listCallsForDay({ date, campaign, telefono }) {
-    const proyectoIds = this.proyectoIdsFor(campaign);
+    const proyectoIds = new Set(this.proyectoIdsFor(campaign));
     const targetDate = date || new Date().toISOString().slice(0, 10);
 
-    const conditions = [
-      'proyecto_id = ANY($1::int[])',
-      'registro_llamada_fecha = $2',
-      'time_speaking > 0',
-      'audiofile IS NOT NULL',
-      'agente_id IS NOT NULL',
-    ];
-    const params = [proyectoIds, targetDate];
+    const params = [targetDate];
+    let where = 'cu.call_start::date = $1::date';
     if (telefono) {
       params.push(`%${telefono}%`);
-      conditions.push(`registro_llamada_fono ILIKE $${params.length}`);
+      where += ` AND cu.telefono ILIKE $${params.length}`;
     }
 
     const pgClient = await this._connect();
     let calls;
     try {
-      const result = await pgClient.query(
-        `SELECT ${CALL_COLUMNS}
-         FROM registro_llamada
-         WHERE ${conditions.join(' AND ')}
-         ORDER BY registro_llamada_hora DESC
-         LIMIT 1000`,
-        params
-      );
-      calls = result.rows.map((r) => this._mapRow(r));
+      calls = (await this._fetchCalls(pgClient, where, params)).filter((c) => proyectoIds.has(c.proyecto_id));
     } finally {
       await pgClient.end().catch(() => {});
     }
+    calls.sort((a, b) => (a.hora < b.hora ? 1 : -1));
 
-    if (!calls.length) return calls;
-    const audits = await db('obama_vital_audits')
-      .whereIn('registro_llamada_id', calls.map((c) => c.registro_llamada_id))
-      .select('id', 'registro_llamada_id', 'status', 'score');
-    const byCall = new Map(audits.map((a) => [a.registro_llamada_id, a]));
-
+    const { byUnique, byRegistro } = await this._auditsFor(calls);
     return calls.map((c) => {
-      const audit = byCall.get(c.registro_llamada_id);
+      const audit = byUnique.get(c.uniqueid) || (c.registro_llamada_id && byRegistro.get(c.registro_llamada_id)) || null;
       return {
         ...c,
         audit_id: audit?.id || null,
@@ -152,32 +248,33 @@ class ObamaVitalService {
     });
   }
 
-  /** Crea la auditoría de una llamada, o devuelve la que ya exista. */
-  async selectOne({ registroLlamadaId, userId }) {
-    const existing = await db('obama_vital_audits').where('registro_llamada_id', registroLlamadaId).first();
+  /** Crea la auditoría de una llamada (identificada por su uniqueid de la central), o devuelve la que ya exista. */
+  async selectOne({ uniqueid, userId }) {
+    const existing = await db('obama_vital_audits').where('uniqueid', uniqueid).first();
     if (existing) return { id: existing.id };
 
     const pgClient = await this._connect();
-    let row;
+    let call;
     try {
-      const result = await pgClient.query(
-        `SELECT ${CALL_COLUMNS}
-         FROM registro_llamada
-         WHERE registro_llamada_id = $1 AND proyecto_id = ANY($2::int[])
-         LIMIT 1`,
-        [registroLlamadaId, ALL_PROYECTO_IDS]
-      );
-      row = result.rows[0];
+      [call] = await this._fetchCalls(pgClient, 'cu.uniqueid = $1', [uniqueid]);
     } finally {
       await pgClient.end().catch(() => {});
     }
-    if (!row) throw httpError(404, 'Llamada no encontrada');
+    if (!call) throw httpError(404, 'Llamada no encontrada');
 
-    const call = this._mapRow(row);
+    // Auditoría anterior a este cambio (sin uniqueid): se le completa y se reutiliza.
+    if (call.registro_llamada_id) {
+      const legacy = await db('obama_vital_audits').where('registro_llamada_id', call.registro_llamada_id).first();
+      if (legacy) {
+        if (!legacy.uniqueid) await db('obama_vital_audits').where({ id: legacy.id }).update({ uniqueid });
+        return { id: legacy.id };
+      }
+    }
+
     const info = this.campaignForProyecto(call.proyecto_id);
-
     await db('obama_vital_audits')
       .insert({
+        uniqueid: call.uniqueid,
         registro_llamada_id: call.registro_llamada_id,
         proyecto_id: call.proyecto_id,
         campaign: info.campaign,
@@ -192,10 +289,10 @@ class ObamaVitalService {
         auditor_id: userId,
         status: 'selected',
       })
-      .onConflict('registro_llamada_id')
+      .onConflict('uniqueid')
       .ignore();
 
-    const saved = await db('obama_vital_audits').where('registro_llamada_id', call.registro_llamada_id).first();
+    const saved = await db('obama_vital_audits').where('uniqueid', call.uniqueid).first();
     return { id: saved.id };
   }
 
@@ -216,7 +313,7 @@ class ObamaVitalService {
     const query = db('obama_vital_audits as a')
       .leftJoin('users as u', 'a.auditor_id', 'u.id')
       .select(
-        'a.id', 'a.registro_llamada_id', 'a.proyecto_id', 'a.campaign', 'a.agente_id', 'a.agente_nombre',
+        'a.id', 'a.uniqueid', 'a.registro_llamada_id', 'a.proyecto_id', 'a.campaign', 'a.agente_id', 'a.agente_nombre',
         'a.telefono', 'a.fecha', 'a.hora', 'a.duracion', 'a.status', 'a.score', 'a.ai_score',
         'a.high_impact_failed', 'u.name as auditor_nombre'
       )

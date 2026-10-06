@@ -20,11 +20,11 @@ exports.listCalls = asyncHandler(async (req, res) => {
   res.json({ data, count: data.length });
 });
 
-// POST /api/obama-vital/select { registro_llamada_id }
+// POST /api/obama-vital/select { uniqueid }  (id de la llamada en la central de Aware)
 exports.select = asyncHandler(async (req, res) => {
-  const registroLlamadaId = Number(req.body.registro_llamada_id);
-  if (!registroLlamadaId) return res.status(400).json({ error: true, message: 'registro_llamada_id requerido' });
-  const data = await ObamaVitalService.selectOne({ registroLlamadaId, userId: req.user.id });
+  const uniqueid = String(req.body.uniqueid || '').trim();
+  if (!/^[0-9.]{5,40}$/.test(uniqueid)) return res.status(400).json({ error: true, message: 'uniqueid requerido' });
+  const data = await ObamaVitalService.selectOne({ uniqueid, userId: req.user.id });
   res.json({ data });
 });
 
