@@ -1,8 +1,8 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai');
+const GeminiService = require('../services/GeminiService');
+const { groupForCodes } = require('../config/geminiBilling');
 const db = require('../database/connection');
 const asyncHandler = require('../middleware/asyncHandler');
 const RealtimeScanService = require('../services/RealtimeScanService');
-const config = require('../config');
 const logger = require('../utils/logger');
 
 /**
@@ -212,10 +212,11 @@ Genera:
 Sé directo, usa datos específicos, no uses introducciones genéricas.`;
 
   try {
-    const genAI = new GoogleGenerativeAI(config.gemini.apiKey);
-    const model = genAI.getGenerativeModel({ model: config.gemini.model });
-    const result = await model.generateContent(prompt);
-    const text = result.response.text();
+    // Se factura a la campaña del usuario (Hogar / TyT); si tiene varias, a la general.
+    const text = await GeminiService.generateText(prompt, {
+      group: groupForCodes(req.user.client_codes || []),
+      flow: 'analisis_dia',
+    });
     res.json({ data: { summary: text, date } });
   } catch (err) {
     logger.error('DailyAnalysis AI error', err);

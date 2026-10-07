@@ -3,6 +3,8 @@ const config = require('../config');
 const logger = require('../utils/logger');
 const { LV_CUSTOMER_PROYECTO } = require('../config/evaluationCriteria');
 const { resolveObamaAgentCampaign } = require('../utils/agentUtils');
+const { groupForCode, groupForVoicebotProyecto, apiKeyFor } = require('../config/geminiBilling');
+const GeminiUsageService = require('./GeminiUsageService');
 const CriteriaService = require('./CriteriaService');
 const {
   SECTION_ROLE_DEFINITION,
@@ -92,8 +94,9 @@ const VOICEBOT_MAX_CONCURRENT = 6;
 
 class GeminiService {
   constructor() {
-    this.genAI = new GoogleGenerativeAI(config.gemini.apiKey);
-    this.model = this.genAI.getGenerativeModel({ model: config.gemini.model });
+    // Un cliente por clave de API: cada campaña (Hogar / TyT / general)
+    // consume de su propio proyecto de Google — ver config/geminiBilling.js.
+    this.clients = new Map();
     this.semaphore = new Semaphore(MAX_CONCURRENT);
     this.voicebotSemaphore = new Semaphore(VOICEBOT_MAX_CONCURRENT);
   }
@@ -106,37 +109,67 @@ class GeminiService {
    * @param {number} [proyectoId] - ID del proyecto en Aware (para LV: distingue Ventas vs Customer)
    * @returns {{ transcription: string, evaluation: object }}
    */
-  async analyzeCall(audioBuffer, clientCode, agentId, proyectoId, mimeType = 'audio/ogg', digitacion = null) {
+  async analyzeCall(audioBuffer, clientCode, agentId, proyectoId, mimeType = 'audio/ogg', digitacion = null, { flow = 'auditoria' } = {}) {
     const campaignKey = await resolveCampaignKey(clientCode, agentId, proyectoId);
     const criteria = await CriteriaService.getByKey(campaignKey);
+    const billing = { group: groupForCode(campaignKey), campaign: campaignKey, flow };
 
     await this.semaphore.acquire();
     try {
-      return await this._doAnalyzeCall(audioBuffer, criteria, mimeType, digitacion);
+      return await this._doAnalyzeCall(audioBuffer, criteria, mimeType, digitacion, billing);
+    } catch (err) {
+      throw this._tagCap(err, billing.group);
     } finally {
       this.semaphore.release();
     }
   }
 
-  async _doAnalyzeCall(audioBuffer, criteria, mimeType = 'audio/ogg', digitacion = null) {
+  async _doAnalyzeCall(audioBuffer, criteria, mimeType = 'audio/ogg', digitacion = null, billing = { group: 'general', flow: 'auditoria' }) {
     const prompt = this._buildPrompt(criteria, digitacion);
     const sizeKB = (audioBuffer.length / 1024).toFixed(0);
     logger.info(`Enviando audio inline a Gemini (${sizeKB} KB) para ${criteria.label}`);
 
     const audioBase64 = audioBuffer.toString('base64');
-    return await this._retryWithFallback(audioBase64, mimeType, prompt, criteria);
+    return await this._retryWithFallback(audioBase64, mimeType, prompt, criteria, billing);
+  }
+
+  /** Modelo de Gemini con la clave de API del grupo de facturación. */
+  _model(group, modelName = config.gemini.model) {
+    const key = apiKeyFor(group);
+    if (!this.clients.has(key)) this.clients.set(key, new GoogleGenerativeAI(key));
+    return this.clients.get(key).getGenerativeModel({ model: modelName });
+  }
+
+  /** Marca el error de tope de gasto con el grupo que lo alcanzó (para pausar solo esa campaña). */
+  _tagCap(err, group) {
+    if (err?.isSpendingCap) err.billingGroup = group;
+    return err;
+  }
+
+  /**
+   * Texto libre (ej. resumen del "Análisis del día"), facturado al grupo dado.
+   */
+  async generateText(prompt, { group = 'general', flow = 'texto', campaign = null } = {}) {
+    const model = this._model(group);
+    try {
+      const result = await model.generateContent(prompt);
+      await GeminiUsageService.record({ group, campaign, flow, model: config.gemini.model, usage: result.response.usageMetadata });
+      return result.response.text();
+    } catch (err) {
+      throw this._tagCap(err, group);
+    }
   }
 
   /**
    * Intenta generateContent con el modelo primario; si falla con 503/429 de forma
    * persistente, reintenta con los modelos de respaldo en FALLBACK_MODELS.
    */
-  async _retryWithFallback(audioBase64, mimeType, prompt, criteria) {
+  async _retryWithFallback(audioBase64, mimeType, prompt, criteria, billing) {
     const modelsToTry = [config.gemini.model, ...FALLBACK_MODELS];
 
     for (let i = 0; i < modelsToTry.length; i++) {
       const modelName = modelsToTry[i];
-      const model = i === 0 ? this.model : this.genAI.getGenerativeModel({ model: modelName });
+      const model = this._model(billing.group, modelName);
 
       try {
         return await this._retryWithBackoff(async () => {
@@ -146,6 +179,8 @@ class GeminiService {
           ]);
           const response = result.response.text();
           logger.debug('Respuesta Gemini recibida', { length: response.length });
+          // Se registra aunque después falle el parseo: Google cobra igual.
+          await GeminiUsageService.record({ ...billing, model: modelName, usage: result.response.usageMetadata });
           return this._parseResponse(response, criteria);
         });
       } catch (err) {
@@ -867,14 +902,19 @@ Responde SOLO el JSON. No incluyas \`\`\`json ni ningún otro texto.`;
    * @param {string} [hangupReason] - Cómo terminó la llamada (call_transfer, user_hangup, agent_hangup, inactivity)
    * @returns {{ score, summary, strengths, issues, summaryScore, summaryIssues, missedTransfer, missedTransferReason }}
    */
-  async analyzeVoicebotCall(promptText, transcript, callSummary, hangupReason) {
+  async analyzeVoicebotCall(promptText, transcript, callSummary, hangupReason, proyectoId = null) {
+    const group = groupForVoicebotProyecto(proyectoId);
+    const model = this._model(group);
     await this.voicebotSemaphore.acquire();
     try {
       const prompt = this._buildVoicebotPrompt(promptText, transcript, callSummary, hangupReason);
       return await this._retryWithBackoff(async () => {
-        const result = await this.model.generateContent([{ text: prompt }]);
+        const result = await model.generateContent([{ text: prompt }]);
+        await GeminiUsageService.record({ group, campaign: `sofia_${proyectoId}`, flow: 'bot_sofia', model: config.gemini.model, usage: result.response.usageMetadata });
         return this._parseVoicebotResponse(result.response.text(), !!callSummary);
       });
+    } catch (err) {
+      throw this._tagCap(err, group);
     } finally {
       this.voicebotSemaphore.release();
     }

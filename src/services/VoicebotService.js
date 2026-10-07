@@ -295,6 +295,11 @@ class VoicebotService {
     await db('voicebot_audit_settings').where('enabled', true).update({ enabled: false, disabled_reason: reason });
   }
 
+  /** Igual, pero solo una campaña: cada una paga Gemini con su propio tope (config/geminiBilling.js). */
+  async autoDisableProyecto(proyectoId, reason) {
+    await db('voicebot_audit_settings').where({ proyecto_id: proyectoId, enabled: true }).update({ enabled: false, disabled_reason: reason });
+  }
+
   // ── Resultados de auditoría IA por llamada ─────────────────────────────────
 
   async getCallAudit(callId) {

@@ -376,7 +376,8 @@ class SofiaHumanService {
         call.agente_id,
         call.proyecto_id,
         'audio/ogg',
-        null
+        null,
+        { flow: 'continuacion_sofia' }
       );
 
       finalId = await this._upsertContinuation(existing?.id, {
@@ -767,7 +768,8 @@ class SofiaHumanService {
       selection.agente_id,
       selection.proyecto_id,
       'audio/ogg',
-      null
+      null,
+      { flow: 'sofia_manual' }
     );
 
     await db('sofia_human_selections')

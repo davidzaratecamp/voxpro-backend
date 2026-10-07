@@ -6,6 +6,7 @@ const SofiaHumanService = require('./SofiaHumanService');
 
 const PROYECTO_IDS = [12, 13];
 const BATCH_SIZE = 40; // cuántas llamadas se traen y procesan en paralelo por corrida, por campaña
+const CAP_REASON = 'Se alcanzó el tope de gasto de Gemini (IA) de esta campaña. La auditoría automática se detuvo sola — revisa el presupuesto en "Consumo IA".';
 
 class VoicebotAuditRunner {
   constructor() {
@@ -73,11 +74,11 @@ class VoicebotAuditRunner {
 
         const spendingCapHit = results.some((r) => r.status === 'rejected' && r.reason?.isSpendingCap);
         if (spendingCapHit) {
-          logger.error('VoicebotAuditRunner: cuota de Gemini agotada, deteniendo auditoría automática');
-          await VoicebotService.autoDisableAllEnabled(
-            'Se agotó la cuota de tokens de Gemini (IA). La auditoría automática se detuvo sola.'
-          );
-          return;
+          // Cada campaña paga Gemini con su propio proyecto (ver
+          // config/geminiBilling.js): se pausa solo esta, la otra sigue.
+          logger.error(`VoicebotAuditRunner: tope de gasto de Gemini alcanzado en proyecto ${proyectoId}, se pausa solo esa campaña`);
+          await VoicebotService.autoDisableProyecto(proyectoId, CAP_REASON);
+          continue;
         }
       }
 
@@ -94,11 +95,9 @@ class VoicebotAuditRunner {
       try {
         const contResult = await SofiaHumanService.processPendingContinuations(proyectoId, 20);
         if (contResult.spendingCapHit) {
-          logger.error('VoicebotAuditRunner: cuota de Gemini agotada (continuación humana), deteniendo auditoría automática');
-          await VoicebotService.autoDisableAllEnabled(
-            'Se agotó la cuota de tokens de Gemini (IA). La auditoría automática se detuvo sola.'
-          );
-          return;
+          logger.error(`VoicebotAuditRunner: tope de gasto de Gemini alcanzado (continuación humana) en proyecto ${proyectoId}, se pausa solo esa campaña`);
+          await VoicebotService.autoDisableProyecto(proyectoId, CAP_REASON);
+          continue;
         }
         if (contResult.processed) {
           logger.info(`VoicebotAuditRunner: ${contResult.processed} continuaciones humanas procesadas para proyecto ${proyectoId}`);
@@ -120,7 +119,7 @@ class VoicebotAuditRunner {
       const detail = await VoicebotService.getCallById(call.call_id);
       if (!detail || !detail.transcript.length) return;
 
-      const result = await GeminiService.analyzeVoicebotCall(prompt, detail.transcript, detail.call_summary, detail.hangup_reason);
+      const result = await GeminiService.analyzeVoicebotCall(prompt, detail.transcript, detail.call_summary, detail.hangup_reason, proyectoId);
 
       // onConflict/ignore como red de seguridad adicional: si por alguna
       // razón dos corridas llegan a procesar la misma llamada, la segunda

@@ -417,7 +417,8 @@ class ObamaVitalService {
       audit.agente_id,
       audit.proyecto_id,
       'audio/ogg',
-      null
+      null,
+      { flow: 'asiste' }
     );
 
     await db('obama_vital_audits')
