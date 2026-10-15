@@ -2,6 +2,7 @@ const crypto   = require('crypto');
 const db        = require('../database/connection');
 const ZoomAuth  = require('./ZoomAuthService');
 const logger    = require('../utils/logger');
+const { bestNameMatch } = require('../utils/nameMatch');
 
 /**
  * Escanea grabaciones de Zoom Phone e inserta en la tabla recordings.
@@ -321,41 +322,16 @@ class ZoomScannerService {
    * @returns {{ cedula: string, name: string } | null}
    */
   async _autoMatchAgent(extension, zoomName, clientId, candidates = null) {
-    const normalize = (str) =>
-      str
-        .toLowerCase()
-        .normalize('NFD')
-        .replace(/[\u0300-\u036f]/g, '')
-        .replace(/[^a-z0-9\s]/g, '');
-
-    const splitCamel = (s) => s.replace(/([a-z])([A-Z])/g, '$1 $2');
-    const tokens = normalize(splitCamel(zoomName))
-      .split(/\s+/)
-      .filter((t) => t.length > 2);
-
-    if (tokens.length === 0) return null;
-
     // Usar candidatos pre-cargados si están disponibles; si no, cargar en el momento
     if (!candidates) candidates = await this._fetchAwareCandidates();
 
-    let best        = null;
-    let bestScore   = 0;
-    let bestOverlap = 0;
-
-    for (const c of candidates) {
-      const candTokens = normalize(splitCamel(c.agent_name))
-        .split(/\s+/)
-        .filter((t) => t.length > 2);
-
-      const overlap = tokens.filter((t) => candTokens.includes(t)).length;
-      const score   = overlap / Math.max(tokens.length, candTokens.length);
-
-      if (overlap >= 2 && score >= 0.5 && score > bestScore) {
-        bestScore   = score;
-        bestOverlap = overlap;
-        best        = c;
-      }
-    }
+    // Regla estricta compartida (utils/nameMatch): además de ≥2 palabras en
+    // común, como mucho una palabra del nombre de Zoom puede faltar y no se
+    // elige nada si hay empate. La regla anterior (solo 2 palabras) asoció la
+    // extensión de "Laura Ladino" a "Laura Valentina Perea Avendaño" (oct-2026).
+    const match = bestNameMatch(zoomName, candidates.map((c) => ({ id: c.agent_id, name: c.agent_name })));
+    const best = match ? { agent_id: match.id, agent_name: match.name } : null;
+    const bestScore = match?.score || 0;
 
     if (!best) return null;
 
@@ -374,7 +350,7 @@ class ZoomScannerService {
 
       logger.info(
         `Zoom: auto-matched "${zoomName}" → ${best.agent_id} (${best.agent_name}) ` +
-        `[overlap=${bestOverlap}, score=${bestScore.toFixed(2)}]`
+        `[score=${bestScore.toFixed(2)}]`
       );
     } catch (err) {
       logger.warn(`Zoom: no se pudo guardar auto-match para extensión ${extension}: ${err.message}`);
