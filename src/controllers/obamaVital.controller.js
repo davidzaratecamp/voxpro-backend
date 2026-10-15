@@ -16,15 +16,19 @@ async function loadAudit(req) {
 // GET /api/obama-vital/calls?date=&campaign=&telefono=
 exports.listCalls = asyncHandler(async (req, res) => {
   const { date, campaign, telefono } = req.query;
-  const data = await ObamaVitalService.listCallsForDay({ date, campaign, telefono });
-  res.json({ data, count: data.length });
+  const { calls, zoomError } = await ObamaVitalService.listCallsForDay({ date, campaign, telefono });
+  res.json({ data: calls, count: calls.length, zoom_error: zoomError });
 });
 
-// POST /api/obama-vital/select { uniqueid }  (id de la llamada en la central de Aware)
+// POST /api/obama-vital/select { uniqueid, fecha }
+// uniqueid: id de la llamada en la central de Aware ("1791225214.14890") o
+// "zoom:<id de la grabación>" para Zoom Phone (que además necesita la fecha).
 exports.select = asyncHandler(async (req, res) => {
   const uniqueid = String(req.body.uniqueid || '').trim();
-  if (!/^[0-9.]{5,40}$/.test(uniqueid)) return res.status(400).json({ error: true, message: 'uniqueid requerido' });
-  const data = await ObamaVitalService.selectOne({ uniqueid, userId: req.user.id });
+  if (!/^([0-9.]{5,40}|zoom:[A-Za-z0-9_-]{8,34})$/.test(uniqueid)) {
+    return res.status(400).json({ error: true, message: 'uniqueid requerido' });
+  }
+  const data = await ObamaVitalService.selectOne({ uniqueid, fecha: req.body.fecha, userId: req.user.id });
   res.json({ data });
 });
 
@@ -62,9 +66,7 @@ exports.update = asyncHandler(async (req, res) => {
 // GET /api/obama-vital/audits/:id/audio
 exports.streamAudio = asyncHandler(async (req, res) => {
   const audit = await loadAudit(req);
-  if (!audit.audiofile) return res.status(404).json({ error: true, message: 'Audio no encontrado' });
-
-  const wav = await ObamaVitalService.getPlayableAudio(audit.audiofile);
+  const wav = await ObamaVitalService.getPlayableAudio(audit.id);
   res.set({
     'Content-Type': 'audio/wav',
     'Content-Length': wav.length,

@@ -11,6 +11,8 @@ const db = require('../database/connection');
 const GeminiService = require('./GeminiService');
 const CriteriaService = require('./CriteriaService');
 const { downloadBuffer } = require('./RealtimeScanService');
+const ZoomAuth = require('./ZoomAuthService');
+const { bestNameMatch } = require('../utils/nameMatch');
 
 const execFileAsync = promisify(execFile);
 
@@ -98,6 +100,20 @@ function callsSql(where) {
 
 const cleanName = (n) => (n ? n.replace(/\s+/g, ' ').trim() : null);
 const toMs = (inicio) => new Date(String(inicio).replace(' ', 'T')).getTime();
+
+// ── Zoom Phone ─────────────────────────────────────────────────────────────
+// Los agentes de Asiste también llaman por Zoom Phone (misma cuenta de Zoom que
+// usa el módulo de Obama). Se leen en vivo de la API —como Aware— para tener
+// hora y dirección de cada llamada (la tabla `recordings` solo guarda la fecha)
+// y no depender del escaneo intradiario.
+const ZOOM_PREFIX = 'zoom:';
+const BOGOTA_OFFSET_MS = 5 * 60 * 60 * 1000; // UTC-5, sin horario de verano
+const isZoomId = (uniqueid) => String(uniqueid || '').startsWith(ZOOM_PREFIX);
+const zoomEnabled = () => !!process.env.ZOOM_ACCOUNT_ID;
+const bogota = (utc) => new Date(new Date(utc).getTime() - BOGOTA_OFFSET_MS).toISOString();
+const nextDay = (d) => new Date(new Date(`${d}T00:00:00Z`).getTime() + 86400000).toISOString().slice(0, 10);
+const BIENVENIDA_IDS = Object.keys(source.campaigns.bienvenida.proyectos).map(Number);
+const CUSTOMER_IDS = Object.keys(source.campaigns.customer.proyectos).map(Number);
 
 class ObamaVitalService {
   campaignForProyecto(proyectoId) {
@@ -213,6 +229,119 @@ class ObamaVitalService {
   }
 
   /**
+   * Agentes de Asiste (los que aparecen en el Aware de Asiste) con su nombre y
+   * cuántas llamadas tienen en cada campaña. Se cachea 10 minutos.
+   */
+  async _asisteAgents() {
+    if (this._agentsCache && Date.now() - this._agentsCache.at < 10 * 60 * 1000) return this._agentsCache.map;
+    const pgClient = await this._connect();
+    let rows;
+    try {
+      ({ rows } = await pgClient.query(
+        `SELECT agente_id, proyecto_id, COUNT(*)::int AS n, MAX(json_data->>'agente') AS nombre
+         FROM registro_llamada WHERE agente_id IS NOT NULL AND agente_id <> '' GROUP BY 1, 2`
+      ));
+    } finally {
+      await pgClient.end().catch(() => {});
+    }
+    const map = new Map();
+    for (const r of rows) {
+      if (!map.has(r.agente_id)) map.set(r.agente_id, { id: r.agente_id, name: cleanName(r.nombre), proyectos: {} });
+      const a = map.get(r.agente_id);
+      a.proyectos[r.proyecto_id] = r.n;
+      if (!a.name && r.nombre) a.name = cleanName(r.nombre);
+    }
+    this._agentsCache = { at: Date.now(), map };
+    return map;
+  }
+
+  /**
+   * Campaña de una llamada de Zoom (Zoom no sabe de campañas): entrantes de un
+   * agente que atiende ObamaCus → su ObamaCus; el resto → su Bienvenida más
+   * frecuente; si no tiene ninguna de las dos, su campaña más frecuente.
+   */
+  _zoomProyecto(agent, direction) {
+    const top = (ids) => ids.filter((id) => agent.proyectos[id]).sort((a, b) => agent.proyectos[b] - agent.proyectos[a])[0];
+    if (direction === 'inbound') {
+      const cus = top(CUSTOMER_IDS);
+      if (cus) return cus;
+    }
+    return top(BIENVENIDA_IDS) || top(Object.keys(agent.proyectos).map(Number).filter((id) => PROYECTO_MAP.has(id))) || null;
+  }
+
+  /**
+   * Grabaciones de Zoom Phone de un día (hora Bogotá) de agentes de Asiste.
+   * Agente: nombre del usuario de Zoom contra los agentes de Asiste; si no
+   * coincide, la extensión → cédula de la tabla `agents` (la del escaneo de Obama).
+   */
+  async _zoomCallsForDay(date) {
+    const cached = this._zoomCache?.get(date);
+    if (cached && Date.now() - cached.at < 60 * 1000) return cached.calls;
+
+    // Una llamada de las 7pm-12am de Bogotá ya es el día siguiente en UTC.
+    const recs = [];
+    let next = null;
+    do {
+      const params = { from: date, to: nextDay(date), page_size: 300 };
+      if (next) params.next_page_token = next;
+      const data = await ZoomAuth.get('/phone/recordings', params);
+      recs.push(...(data.recordings || []));
+      next = data.next_page_token || null;
+    } while (next);
+
+    const delDia = recs.filter((r) => r.download_url && r.date_time && bogota(r.date_time).slice(0, 10) === date);
+    const agents = await this._asisteAgents();
+    const candidatos = [...agents.values()].filter((a) => a.name);
+
+    const exts = [...new Set(delDia.map((r) => r.owner?.extension_number).filter(Boolean).map(String))];
+    const mapeo = new Map();
+    if (exts.length) {
+      const rows = await db('agents').whereIn('zoom_extension', exts).whereNotNull('cedula')
+        .groupBy('zoom_extension').select('zoom_extension', db.raw('MAX(cedula) AS cedula'));
+      for (const r of rows) mapeo.set(String(r.zoom_extension), String(r.cedula));
+    }
+
+    const calls = [];
+    for (const r of delDia) {
+      const ext = r.owner?.extension_number ? String(r.owner.extension_number) : null;
+      // Primero el nombre del usuario de Zoom (regla estricta, contra los
+      // agentes de Asiste); la asociación extensión→cédula de la tabla `agents`
+      // solo si el nombre no coincide (ej. usuarios genéricos). No al revés: el
+      // escaneo de Obama asoció mal algunas extensiones (oct-2026: la 1445 de
+      // Laura Ladino quedó con la cédula de Laura Perea).
+      const cedula = bestNameMatch(r.owner?.name, candidatos)?.id || (ext && mapeo.get(ext)) || null;
+      const agent = cedula ? agents.get(cedula) : null;
+      if (!agent) continue; // no es agente de Asiste
+
+      const proyectoId = this._zoomProyecto(agent, r.direction);
+      const info = this.campaignForProyecto(proyectoId);
+      if (!info) continue;
+      const inicio = bogota(r.date_time);
+      calls.push({
+        uniqueid: `${ZOOM_PREFIX}${r.id}`,
+        fuente: 'zoom',
+        registro_llamada_id: null,
+        registrada: true,
+        proyecto_id: proyectoId,
+        proyecto_nombre: info.proyectoName,
+        campaign: info.campaign,
+        fecha: inicio.slice(0, 10),
+        hora: inicio.slice(11, 19),
+        telefono: (r.direction === 'inbound' ? r.caller_number : r.callee_number) || null,
+        direccion: r.direction === 'inbound' ? 'entrante' : 'saliente',
+        agente_id: agent.id,
+        agente_nombre: agent.name,
+        duracion: r.duration || 0,
+        audio_url: r.download_url,
+      });
+    }
+
+    if (!this._zoomCache) this._zoomCache = new Map();
+    this._zoomCache.set(date, { at: Date.now(), calls });
+    return calls;
+  }
+
+  /**
    * Llamadas contestadas y con grabación de un día, en vivo desde Aware.
    * Cada una sale marcada con su auditoría si ya existe (una por llamada).
    */
@@ -230,14 +359,31 @@ class ObamaVitalService {
     const pgClient = await this._connect();
     let calls;
     try {
-      calls = (await this._fetchCalls(pgClient, where, params)).filter((c) => proyectoIds.has(c.proyecto_id));
+      calls = (await this._fetchCalls(pgClient, where, params))
+        .filter((c) => proyectoIds.has(c.proyecto_id))
+        .map((c) => ({ ...c, fuente: 'aware' }));
     } finally {
       await pgClient.end().catch(() => {});
+    }
+
+    // Zoom: si falla, se sigue mostrando lo de Aware y se avisa.
+    let zoomError = null;
+    if (zoomEnabled()) {
+      try {
+        const tel = telefono ? String(telefono).replace(/\D/g, '') : '';
+        const zoom = (await this._zoomCallsForDay(targetDate))
+          .filter((c) => proyectoIds.has(c.proyecto_id))
+          .filter((c) => !tel || String(c.telefono || '').replace(/\D/g, '').includes(tel));
+        calls.push(...zoom);
+      } catch (err) {
+        logger.error('ObamaVitalService: no se pudieron leer las grabaciones de Zoom', { message: err.message });
+        zoomError = 'No se pudieron cargar las llamadas de Zoom en este momento; se muestran solo las de Aware.';
+      }
     }
     calls.sort((a, b) => (a.hora < b.hora ? 1 : -1));
 
     const { byUnique, byRegistro } = await this._auditsFor(calls);
-    return calls.map((c) => {
+    const data = calls.map(({ audio_url, audiofile, ...c }) => {
       const audit = byUnique.get(c.uniqueid) || (c.registro_llamada_id && byRegistro.get(c.registro_llamada_id)) || null;
       return {
         ...c,
@@ -246,12 +392,14 @@ class ObamaVitalService {
         audit_score: audit?.score ?? null,
       };
     });
+    return { calls: data, zoomError };
   }
 
   /** Crea la auditoría de una llamada (identificada por su uniqueid de la central), o devuelve la que ya exista. */
-  async selectOne({ uniqueid, userId }) {
+  async selectOne({ uniqueid, fecha, userId }) {
     const existing = await db('obama_vital_audits').where('uniqueid', uniqueid).first();
     if (existing) return { id: existing.id };
+    if (isZoomId(uniqueid)) return this._selectZoom({ uniqueid, fecha, userId });
 
     const pgClient = await this._connect();
     let call;
@@ -296,6 +444,49 @@ class ObamaVitalService {
     return { id: saved.id };
   }
 
+  /** Auditoría de una llamada de Zoom: se busca en las grabaciones de Zoom de su fecha. */
+  async _selectZoom({ uniqueid, fecha, userId }) {
+    if (!zoomEnabled()) throw httpError(400, 'Zoom no está configurado en este servidor');
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fecha || ''))) throw httpError(400, 'fecha requerida para llamadas de Zoom');
+    const call = (await this._zoomCallsForDay(fecha)).find((c) => c.uniqueid === uniqueid);
+    if (!call) throw httpError(404, 'Llamada de Zoom no encontrada');
+
+    const info = this.campaignForProyecto(call.proyecto_id);
+    await db('obama_vital_audits')
+      .insert({
+        uniqueid: call.uniqueid,
+        source: 'zoom',
+        audio_url: call.audio_url,
+        registro_llamada_id: null,
+        proyecto_id: call.proyecto_id,
+        campaign: info.campaign,
+        campaign_key: info.key,
+        agente_id: call.agente_id,
+        agente_nombre: call.agente_nombre,
+        telefono: call.telefono,
+        fecha: call.fecha,
+        hora: call.hora,
+        duracion: call.duracion,
+        audiofile: null,
+        auditor_id: userId,
+        status: 'selected',
+      })
+      .onConflict('uniqueid')
+      .ignore();
+    const saved = await db('obama_vital_audits').where('uniqueid', call.uniqueid).first();
+    return { id: saved.id };
+  }
+
+  /** Audio crudo de una auditoría, de Aware o de Zoom según su fuente. */
+  async _rawAudio(audit) {
+    if (audit.source === 'zoom') {
+      if (!audit.audio_url) throw httpError(404, 'Esta llamada no tiene audio disponible');
+      return ZoomAuth.download(audit.audio_url);
+    }
+    if (!audit.audiofile) throw httpError(404, 'Esta llamada no tiene audio disponible');
+    return downloadBuffer(this.getAudioUrl(audit.audiofile));
+  }
+
   async getById(id) {
     const audit = await db('obama_vital_audits as a')
       .leftJoin('users as u', 'a.auditor_id', 'u.id')
@@ -303,8 +494,10 @@ class ObamaVitalService {
       .select('a.*', 'u.name as auditor_nombre')
       .first();
     if (!audit) return null;
+    // La URL de descarga de Zoom no sale al navegador: el audio pasa por el backend.
+    const { audio_url, ...rest } = audit;
     return {
-      ...audit,
+      ...rest,
       proyecto_nombre: this.campaignForProyecto(audit.proyecto_id)?.proyectoName || null,
     };
   }
@@ -313,7 +506,7 @@ class ObamaVitalService {
     const query = db('obama_vital_audits as a')
       .leftJoin('users as u', 'a.auditor_id', 'u.id')
       .select(
-        'a.id', 'a.uniqueid', 'a.registro_llamada_id', 'a.proyecto_id', 'a.campaign', 'a.agente_id', 'a.agente_nombre',
+        'a.id', 'a.uniqueid', 'a.source', 'a.registro_llamada_id', 'a.proyecto_id', 'a.campaign', 'a.agente_id', 'a.agente_nombre',
         'a.telefono', 'a.fecha', 'a.hora', 'a.duracion', 'a.status', 'a.score', 'a.ai_score',
         'a.high_impact_failed', 'u.name as auditor_nombre'
       )
@@ -402,10 +595,9 @@ class ObamaVitalService {
   async analyze(id) {
     const audit = await db('obama_vital_audits').where({ id }).first();
     if (!audit) throw httpError(404, 'Auditoría no encontrada');
-    if (!audit.audiofile) throw httpError(404, 'Esta llamada no tiene audio disponible');
 
     const t0 = Date.now();
-    const rawBuffer = await downloadBuffer(this.getAudioUrl(audit.audiofile));
+    const rawBuffer = await this._rawAudio(audit);
     logger.info(`ObamaVitalService: audio descargado (${(rawBuffer.length / 1024).toFixed(0)} KB) en ${Date.now() - t0}ms`);
 
     // Opus 16kHz mono ~32kbps — igual que AnalysisService, evita timeouts en Gemini.
@@ -445,8 +637,11 @@ class ObamaVitalService {
   }
 
   /** Audio convertido a WAV PCM para el reproductor del navegador. */
-  async getPlayableAudio(audiofile) {
-    const rawBuffer = await downloadBuffer(this.getAudioUrl(audiofile));
+  async getPlayableAudio(id) {
+    // Fila completa: getById() no expone audio_url (la URL de Zoom).
+    const audit = await db('obama_vital_audits').where({ id }).first();
+    if (!audit) throw httpError(404, 'Auditoría no encontrada');
+    const rawBuffer = await this._rawAudio(audit);
     return convertAudio(rawBuffer, ['-acodec', 'pcm_s16le', '-ar', '16000', '-ac', '1'], 'wav');
   }
 
