@@ -1,6 +1,11 @@
 const axios = require('axios');
 const logger = require('../utils/logger');
 
+// Sin límite, una llamada a Zoom que no responde deja colgada la petición que
+// la hizo (y la pantalla cargando). La descarga de audio tiene más margen.
+const API_TIMEOUT_MS = 30_000;
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+
 /**
  * Maneja la autenticación Server-to-Server OAuth con Zoom.
  * Cachea el token en memoria y lo renueva automáticamente antes de que expire.
@@ -33,7 +38,7 @@ class ZoomAuthService {
     const response = await axios.post(
       `https://zoom.us/oauth/token?grant_type=account_credentials&account_id=${accountId}`,
       null,
-      { headers: { Authorization: `Basic ${credentials}` } }
+      { headers: { Authorization: `Basic ${credentials}` }, timeout: API_TIMEOUT_MS }
     );
 
     this._token     = response.data.access_token;
@@ -53,6 +58,7 @@ class ZoomAuthService {
       headers: { Authorization: `Bearer ${token}` },
       responseType: 'arraybuffer',
       maxRedirects: 5,
+      timeout: DOWNLOAD_TIMEOUT_MS,
     });
     return Buffer.from(response.data);
   }
@@ -65,6 +71,7 @@ class ZoomAuthService {
     const response = await axios.get(`https://api.zoom.us/v2${path}`, {
       headers: { Authorization: `Bearer ${token}` },
       params,
+      timeout: API_TIMEOUT_MS,
     });
     return response.data;
   }

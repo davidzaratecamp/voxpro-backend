@@ -274,10 +274,46 @@ class ObamaVitalService {
    * Agente: nombre del usuario de Zoom contra los agentes de Asiste; si no
    * coincide, la extensión → cédula de la tabla `agents` (la del escaneo de Obama).
    */
+  /**
+   * Grabaciones de Zoom de un día, cacheadas 5 minutos. Si ya hay una consulta
+   * en curso para ese día (ej. el auditor escribiendo un teléfono: una petición
+   * por tecla), las demás esperan esa misma en vez de ir otra vez a Zoom.
+   */
   async _zoomCallsForDay(date) {
-    const cached = this._zoomCache?.get(date);
-    if (cached && Date.now() - cached.at < 60 * 1000) return cached.calls;
+    if (!this._zoomCache) this._zoomCache = new Map();
+    const cached = this._zoomCache.get(date);
+    if (cached?.calls && Date.now() - cached.at < 5 * 60 * 1000) return cached.calls;
+    if (cached?.pending) return cached.pending;
 
+    const pending = this._loadZoomCallsForDay(date);
+    this._zoomCache.set(date, { pending });
+    try {
+      const calls = await pending;
+      this._zoomCache.set(date, { at: Date.now(), calls });
+      return calls;
+    } catch (err) {
+      this._zoomCache.delete(date);
+      throw err;
+    }
+  }
+
+  /**
+   * Extensión de Zoom → cédula según la tabla `agents` (la del escaneo de
+   * Obama). Una consulta por extensión con LIMIT 1 y cacheada por proceso: la
+   * tabla tiene millones de filas duplicadas (oct-2026) y un GROUP BY sobre ella
+   * tardaba minutos y dejaba la pantalla cargando.
+   */
+  async _cedulaPorExtension(ext) {
+    if (!this._extCache) this._extCache = new Map();
+    const hit = this._extCache.get(ext);
+    if (hit && Date.now() - hit.at < 60 * 60 * 1000) return hit.cedula;
+    const row = await db('agents').where('zoom_extension', ext).whereNotNull('cedula').first('cedula');
+    const cedula = row ? String(row.cedula) : null;
+    this._extCache.set(ext, { at: Date.now(), cedula });
+    return cedula;
+  }
+
+  async _loadZoomCallsForDay(date) {
     // Una llamada de las 7pm-12am de Bogotá ya es el día siguiente en UTC.
     const recs = [];
     let next = null;
@@ -293,14 +329,6 @@ class ObamaVitalService {
     const agents = await this._asisteAgents();
     const candidatos = [...agents.values()].filter((a) => a.name);
 
-    const exts = [...new Set(delDia.map((r) => r.owner?.extension_number).filter(Boolean).map(String))];
-    const mapeo = new Map();
-    if (exts.length) {
-      const rows = await db('agents').whereIn('zoom_extension', exts).whereNotNull('cedula')
-        .groupBy('zoom_extension').select('zoom_extension', db.raw('MAX(cedula) AS cedula'));
-      for (const r of rows) mapeo.set(String(r.zoom_extension), String(r.cedula));
-    }
-
     const calls = [];
     for (const r of delDia) {
       const ext = r.owner?.extension_number ? String(r.owner.extension_number) : null;
@@ -309,7 +337,7 @@ class ObamaVitalService {
       // solo si el nombre no coincide (ej. usuarios genéricos). No al revés: el
       // escaneo de Obama asoció mal algunas extensiones (oct-2026: la 1445 de
       // Laura Ladino quedó con la cédula de Laura Perea).
-      const cedula = bestNameMatch(r.owner?.name, candidatos)?.id || (ext && mapeo.get(ext)) || null;
+      const cedula = bestNameMatch(r.owner?.name, candidatos)?.id || (ext ? await this._cedulaPorExtension(ext) : null);
       const agent = cedula ? agents.get(cedula) : null;
       if (!agent) continue; // no es agente de Asiste
 
@@ -336,8 +364,6 @@ class ObamaVitalService {
       });
     }
 
-    if (!this._zoomCache) this._zoomCache = new Map();
-    this._zoomCache.set(date, { at: Date.now(), calls });
     return calls;
   }
 
