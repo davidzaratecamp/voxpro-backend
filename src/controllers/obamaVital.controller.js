@@ -32,10 +32,29 @@ exports.select = asyncHandler(async (req, res) => {
   res.json({ data });
 });
 
-// GET /api/obama-vital/audits?status=&campaign=&date_from=&date_to=&agente=&telefono=
+const SOURCES = ['aware', 'zoom'];
+
+function auditFilters(q) {
+  return {
+    status: q.status || undefined,
+    campaign: q.campaign || undefined,
+    source: SOURCES.includes(q.source) ? q.source : undefined,
+    dateFrom: q.date_from || undefined,
+    dateTo: q.date_to || undefined,
+    agente: q.agente || undefined,
+    telefono: q.telefono || undefined,
+  };
+}
+
+// GET /api/obama-vital/audits?status=&campaign=&source=&date_from=&date_to=&agente=&telefono=
 exports.listAudits = asyncHandler(async (req, res) => {
-  const { status, campaign, date_from, date_to, agente, telefono } = req.query;
-  const data = await ObamaVitalService.listAudits({ status, campaign, dateFrom: date_from, dateTo: date_to, agente, telefono });
+  const data = await ObamaVitalService.listAudits(auditFilters(req.query));
+  res.json({ data, count: data.length });
+});
+
+// GET /api/obama-vital/audits/export?…mismos filtros — para el Excel del historial
+exports.exportAudits = asyncHandler(async (req, res) => {
+  const data = await ObamaVitalService.exportAudits(auditFilters(req.query));
   res.json({ data, count: data.length });
 });
 

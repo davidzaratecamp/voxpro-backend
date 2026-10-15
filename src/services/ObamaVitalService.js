@@ -502,7 +502,50 @@ class ObamaVitalService {
     };
   }
 
-  async listAudits({ status, campaign, dateFrom, dateTo, agente, telefono }) {
+  /** Filtros comunes del historial y de su exportación a Excel. */
+  _auditFilters(query, { status, campaign, source, dateFrom, dateTo, agente, telefono }) {
+    if (status) query.where('a.status', status);
+    if (campaign) query.where('a.campaign', campaign);
+    if (source) query.where('a.source', source);
+    if (dateFrom) query.where('a.fecha', '>=', dateFrom);
+    if (dateTo) query.where('a.fecha', '<=', dateTo);
+    if (agente) {
+      query.where((qb) => {
+        qb.where('a.agente_id', 'like', `%${agente}%`).orWhere('a.agente_nombre', 'like', `%${agente}%`);
+      });
+    }
+    if (telefono) query.where('a.telefono', 'like', `%${telefono}%`);
+    return query;
+  }
+
+  /**
+   * Auditorías filtradas con todo lo necesario para el Excel del historial:
+   * criterios y observaciones — sin transcripción ni URL de audio.
+   */
+  async exportAudits(filters) {
+    const query = db('obama_vital_audits as a')
+      .leftJoin('users as u', 'a.auditor_id', 'u.id')
+      .select(
+        'a.id', 'a.source', 'a.proyecto_id', 'a.campaign', 'a.agente_id', 'a.agente_nombre', 'a.telefono',
+        'a.fecha', 'a.hora', 'a.duracion', 'a.status', 'a.score', 'a.ai_score', 'a.high_impact_failed',
+        'a.criteria_general', 'a.criteria_high_impact', 'a.notes', 'a.scored_at', 'a.analyzed_at',
+        'u.name as auditor_nombre'
+      )
+      .orderBy('a.agente_nombre')
+      .orderBy('a.fecha')
+      .orderBy('a.hora')
+      .limit(10000);
+    const rows = await this._auditFilters(query, filters);
+    const parse = (v) => (typeof v === 'string' ? JSON.parse(v) : v || []);
+    return rows.map((r) => ({
+      ...r,
+      proyecto_nombre: this.campaignForProyecto(r.proyecto_id)?.proyectoName || null,
+      criteria_general: parse(r.criteria_general),
+      criteria_high_impact: parse(r.criteria_high_impact),
+    }));
+  }
+
+  async listAudits({ status, campaign, source, dateFrom, dateTo, agente, telefono }) {
     const query = db('obama_vital_audits as a')
       .leftJoin('users as u', 'a.auditor_id', 'u.id')
       .select(
@@ -513,17 +556,7 @@ class ObamaVitalService {
       .orderBy('a.fecha', 'desc')
       .orderBy('a.hora', 'desc')
       .limit(500);
-
-    if (status) query.where('a.status', status);
-    if (campaign) query.where('a.campaign', campaign);
-    if (dateFrom) query.where('a.fecha', '>=', dateFrom);
-    if (dateTo) query.where('a.fecha', '<=', dateTo);
-    if (agente) {
-      query.where((qb) => {
-        qb.where('a.agente_id', 'like', `%${agente}%`).orWhere('a.agente_nombre', 'like', `%${agente}%`);
-      });
-    }
-    if (telefono) query.where('a.telefono', 'like', `%${telefono}%`);
+    this._auditFilters(query, { status, campaign, source, dateFrom, dateTo, agente, telefono });
 
     const rows = await query;
     return rows.map((r) => ({

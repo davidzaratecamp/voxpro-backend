@@ -14,6 +14,7 @@ router.use((req, res, next) => {
 router.get('/calls', ctrl.listCalls);
 router.post('/select', ctrl.select);
 router.get('/audits', ctrl.listAudits);
+router.get('/audits/export', ctrl.exportAudits);
 router.get('/summary', ctrl.summary);
 router.get('/audits/:id', ctrl.getById);
 router.patch('/audits/:id', ctrl.update);
