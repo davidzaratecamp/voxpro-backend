@@ -19,6 +19,14 @@ router.get('/commercial-stats', requireRole('supervisor_calidad', 'gestor_usuari
 // cuentas auditor_ia — mismo motivo que commercial-stats arriba.
 router.get('/feedback', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.getFeedback);
 
+// "Calificación de agentes": promedio semanal por agente sobre las
+// continuaciones calificadas por la IA y el detalle de cada auditoría —
+// mismos roles que Continuidad.
+router.get('/agents-weekly', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.getAgentWeekly);
+router.get('/agents-weekly/:agenteId/audits', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.listAgentWeekAudits);
+router.get('/continuations/:id', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.getContinuationAudit);
+router.get('/continuations/:id/audio', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.streamContinuationAudio);
+
 // El resto del módulo (seleccionar/auditar llamadas humanas) es solo para
 // quien audita al agente humano — auditor_ia no lo usa.
 router.use(requireRole('supervisor_calidad', 'gestor_usuarios'));

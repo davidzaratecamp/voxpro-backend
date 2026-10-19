@@ -21,6 +21,13 @@ function proyectosForClientCodes(clientCodes) {
   return HUMAN_PROYECTO_IDS.filter((id) => clientCodes.includes(voicebotSource.humanProyectos[id]));
 }
 
+/** Semana lunes–domingo que empieza en `weekStart` (YYYY-MM-DD) y la anterior. */
+function weekRange(weekStart) {
+  const d = new Date(`${weekStart}T00:00:00Z`);
+  const add = (days) => new Date(d.getTime() + days * 86400000).toISOString().slice(0, 10);
+  return { from: add(0), to: add(6), prevFrom: add(-7), prevTo: add(-1) };
+}
+
 class SofiaHumanService {
   async _connect() {
     const pgClient = new PGClient({ ...voicebotSource.db, statement_timeout: 20000, connectionTimeoutMillis: 10000 });
@@ -560,6 +567,98 @@ class SofiaHumanService {
       criteria_high_impact: typeof r.criteria_high_impact === 'string' ? JSON.parse(r.criteria_high_impact) : r.criteria_high_impact,
       delivered_by_name: userMap.get(r.delivered_by) || null,
     }));
+  }
+
+  /**
+   * "Calificación de agentes": una fila por agente con su promedio de la
+   * semana (lunes a domingo) sobre las continuaciones ya calificadas por la
+   * IA, más el promedio de la semana anterior para ver si sube o baja.
+   * `weekStart` es el lunes en formato YYYY-MM-DD.
+   */
+  async getAgentWeekly({ clientCodes, weekStart }) {
+    const { from, to, prevFrom, prevTo } = weekRange(weekStart);
+
+    const base = (desde, hasta) => db('sofia_continuation_audits')
+      .whereIn('client_code', clientCodes)
+      .where('status', 'scored')
+      .whereNotNull('agente_id')
+      .whereBetween('fecha', [desde, hasta]);
+
+    const rows = await base(from, to)
+      .select('agente_id', 'client_code')
+      .select(db.raw('MAX(agente_nombre) as agente_nombre'))
+      .select(db.raw('COUNT(*) as auditorias'))
+      .select(db.raw('ROUND(AVG(score), 1) as promedio'))
+      .select(db.raw('MIN(score) as minimo'))
+      .select(db.raw('MAX(score) as maximo'))
+      .select(db.raw('SUM(CASE WHEN high_impact_failed = 1 THEN 1 ELSE 0 END) as criticos'))
+      .select(db.raw('SUM(CASE WHEN score < 60 THEN 1 ELSE 0 END) as bajo_60'))
+      .select(db.raw("SUM(CASE WHEN nomenclatura_id = 'UP' THEN 1 ELSE 0 END) as ventas"))
+      .groupBy('agente_id', 'client_code')
+      .orderBy('promedio', 'desc');
+
+    const prev = await base(prevFrom, prevTo)
+      .select('agente_id', 'client_code')
+      .select(db.raw('ROUND(AVG(score), 1) as promedio'))
+      .groupBy('agente_id', 'client_code');
+    const prevMap = new Map(prev.map((r) => [`${r.client_code}|${r.agente_id}`, Number(r.promedio)]));
+
+    const agentes = rows.map((r) => ({
+      agente_id: r.agente_id,
+      agente_nombre: r.agente_nombre,
+      client_code: r.client_code,
+      auditorias: Number(r.auditorias),
+      promedio: r.promedio == null ? null : Number(r.promedio),
+      minimo: r.minimo,
+      maximo: r.maximo,
+      criticos: Number(r.criticos),
+      bajo_60: Number(r.bajo_60),
+      ventas: Number(r.ventas),
+      promedio_anterior: prevMap.get(`${r.client_code}|${r.agente_id}`) ?? null,
+    }));
+
+    const total = agentes.reduce((acc, a) => acc + a.auditorias, 0);
+    const suma = agentes.reduce((acc, a) => acc + (a.promedio || 0) * a.auditorias, 0);
+    return {
+      semana: { desde: from, hasta: to },
+      resumen: {
+        agentes: agentes.length,
+        auditorias: total,
+        promedio: total ? Math.round((suma / total) * 10) / 10 : null,
+        criticos: agentes.reduce((acc, a) => acc + a.criticos, 0),
+      },
+      agentes,
+    };
+  }
+
+  /** Auditorías calificadas de un agente en esa semana (sin transcripción, para el listado). */
+  async listAgentWeekAudits({ clientCodes, agenteId, weekStart }) {
+    const { from, to } = weekRange(weekStart);
+    return db('sofia_continuation_audits')
+      .whereIn('client_code', clientCodes)
+      .where({ status: 'scored', agente_id: agenteId })
+      .whereBetween('fecha', [from, to])
+      .orderBy('fecha', 'desc')
+      .orderBy('hora', 'desc')
+      .select(
+        'id', 'bot_call_id', 'client_code', 'agente_id', 'agente_nombre', 'telefono',
+        db.raw("DATE_FORMAT(fecha, '%Y-%m-%d') as fecha"), 'hora', 'duracion', 'score',
+        'high_impact_failed', 'nomenclatura_id', 'nomenclatura_nombre',
+      );
+  }
+
+  /** Una auditoría completa (criterios, resumen y transcripción) para el detalle. */
+  async getContinuationAudit(id) {
+    const row = await db('sofia_continuation_audits')
+      .where({ id, status: 'scored' })
+      .select('*', db.raw("DATE_FORMAT(fecha, '%Y-%m-%d') as fecha"))
+      .first();
+    if (!row) return null;
+    return {
+      ...row,
+      criteria_general: typeof row.criteria_general === 'string' ? JSON.parse(row.criteria_general) : row.criteria_general,
+      criteria_high_impact: typeof row.criteria_high_impact === 'string' ? JSON.parse(row.criteria_high_impact) : row.criteria_high_impact,
+    };
   }
 
   /**

@@ -141,12 +141,9 @@ exports.update = asyncHandler(async (req, res) => {
   res.json({ message: 'Actualizado' });
 });
 
-// GET /api/sofia-human/selections/:id/audio
-exports.streamAudio = asyncHandler(async (req, res) => {
-  const selection = await loadSelectionWithAccess(req);
-  if (!selection.audiofile) return res.status(404).json({ error: true, message: 'Audio no encontrado' });
-
-  const audioUrl = SofiaHumanService.getAudioUrl(selection.audiofile);
+/** Descarga el audio de Aware y lo entrega como WAV 16 kHz mono (reproducible en el navegador). */
+async function sendAudioAsWav(res, audiofile, filename) {
+  const audioUrl = SofiaHumanService.getAudioUrl(audiofile);
   const audioBuffer = await downloadBuffer(audioUrl);
 
   const tmpDir = os.tmpdir();
@@ -167,7 +164,7 @@ exports.streamAudio = asyncHandler(async (req, res) => {
     res.set({
       'Content-Type': 'audio/wav',
       'Content-Length': converted.length,
-      'Content-Disposition': `inline; filename="${req.params.id}.wav"`,
+      'Content-Disposition': `inline; filename="${filename}"`,
       'Cache-Control': 'no-store',
     });
     res.send(converted);
@@ -175,6 +172,13 @@ exports.streamAudio = asyncHandler(async (req, res) => {
     fs.unlink(tmpInput, () => {});
     fs.unlink(tmpOutput, () => {});
   }
+}
+
+// GET /api/sofia-human/selections/:id/audio
+exports.streamAudio = asyncHandler(async (req, res) => {
+  const selection = await loadSelectionWithAccess(req);
+  if (!selection.audiofile) return res.status(404).json({ error: true, message: 'Audio no encontrado' });
+  await sendAudioAsWav(res, selection.audiofile, `${req.params.id}.wav`);
 });
 
 // GET /api/sofia-human/criteria/:clientCode
@@ -204,4 +208,60 @@ exports.analyze = asyncHandler(async (req, res) => {
   await loadSelectionWithAccess(req);
   const result = await SofiaHumanService.analyzeSelection(Number(req.params.id));
   res.json({ message: 'Análisis completado', data: result });
+});
+
+/** client_codes del filtro: el pedido (si tiene acceso) o todos los que puede ver. */
+function clientCodesFor(req) {
+  const { client_code } = req.query;
+  if (client_code) {
+    assertClientAccess(req, client_code);
+    return [client_code];
+  }
+  const allowed = resolveAllowedClientCodes(req.user);
+  return allowed === null ? CLIENT_CODES : allowed;
+}
+
+/** `week` = lunes de la semana (YYYY-MM-DD). */
+function parseWeek(req) {
+  const { week } = req.query;
+  const d = /^\d{4}-\d{2}-\d{2}$/.test(week || '') ? new Date(`${week}T00:00:00Z`) : null;
+  if (!d || Number.isNaN(d.getTime()) || d.getUTCDay() !== 1) {
+    const err = new Error('week debe ser el lunes de la semana (YYYY-MM-DD)');
+    err.statusCode = 400;
+    throw err;
+  }
+  return week;
+}
+
+// GET /api/sofia-human/agents-weekly?week=&client_code=
+exports.getAgentWeekly = asyncHandler(async (req, res) => {
+  const data = await SofiaHumanService.getAgentWeekly({ clientCodes: clientCodesFor(req), weekStart: parseWeek(req) });
+  res.json({ data });
+});
+
+// GET /api/sofia-human/agents-weekly/:agenteId/audits?week=&client_code=
+exports.listAgentWeekAudits = asyncHandler(async (req, res) => {
+  const data = await SofiaHumanService.listAgentWeekAudits({
+    clientCodes: clientCodesFor(req),
+    agenteId: req.params.agenteId,
+    weekStart: parseWeek(req),
+  });
+  res.json({ data, count: data.length });
+});
+
+// GET /api/sofia-human/continuations/:id
+exports.getContinuationAudit = asyncHandler(async (req, res) => {
+  const data = await SofiaHumanService.getContinuationAudit(Number(req.params.id));
+  if (!data) return res.status(404).json({ error: true, message: 'Auditoría no encontrada' });
+  assertClientAccess(req, data.client_code);
+  res.json({ data });
+});
+
+// GET /api/sofia-human/continuations/:id/audio
+exports.streamContinuationAudio = asyncHandler(async (req, res) => {
+  const data = await SofiaHumanService.getContinuationAudit(Number(req.params.id));
+  if (!data) return res.status(404).json({ error: true, message: 'Auditoría no encontrada' });
+  assertClientAccess(req, data.client_code);
+  if (!data.audiofile) return res.status(404).json({ error: true, message: 'Audio no encontrado' });
+  await sendAudioAsWav(res, data.audiofile, `continuacion_${data.id}.wav`);
 });
