@@ -5,6 +5,8 @@ const fs = require('fs');
 const path = require('path');
 const asyncHandler = require('../middleware/asyncHandler');
 const SofiaHumanService = require('../services/SofiaHumanService');
+const ContinuationExportService = require('../services/ContinuationExportService');
+const logger = require('../utils/logger');
 const voicebotSource = require('../config/voicebotSource');
 const { downloadBuffer } = require('./RealtimeScanService');
 const { resolveAllowedClientCodes, CLIENT_CODES } = require('../utils/sofiaHumanAccess');
@@ -264,4 +266,43 @@ exports.streamContinuationAudio = asyncHandler(async (req, res) => {
   assertClientAccess(req, data.client_code);
   if (!data.audiofile) return res.status(404).json({ error: true, message: 'Audio no encontrado' });
   await sendAudioAsWav(res, data.audiofile, `continuacion_${data.id}.wav`);
+});
+
+const EXPORT_MAX_DAYS = 31;
+
+/** date_from/date_to obligatorios (YYYY-MM-DD), con un máximo de EXPORT_MAX_DAYS días. */
+function parseExportRange(req) {
+  const { date_from: from, date_to: to } = req.query;
+  const valid = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '') && !Number.isNaN(new Date(`${s}T00:00:00Z`).getTime());
+  const fail = (message) => { const err = new Error(message); err.statusCode = 400; throw err; };
+  if (!valid(from) || !valid(to)) fail('Se requieren date_from y date_to (YYYY-MM-DD)');
+  const days = (new Date(`${to}T00:00:00Z`) - new Date(`${from}T00:00:00Z`)) / 86400000;
+  if (days < 0) fail('La fecha inicial es posterior a la final');
+  if (days >= EXPORT_MAX_DAYS) fail(`El rango máximo es de ${EXPORT_MAX_DAYS} días`);
+  return { dateFrom: from, dateTo: to };
+}
+
+// GET /api/sofia-human/continuations-export/count?date_from=&date_to=&client_code=
+exports.countContinuationsExport = asyncHandler(async (req, res) => {
+  const count = await ContinuationExportService.count({ clientCodes: clientCodesFor(req), ...parseExportRange(req) });
+  res.json({ data: { count } });
+});
+
+// GET /api/sofia-human/continuations-export?date_from=&date_to=&client_code=
+// .xlsx generado en streaming (un mes de TyT son ~40 MB de transcripciones).
+exports.exportContinuations = asyncHandler(async (req, res) => {
+  const range = parseExportRange(req);
+  const clientCodes = clientCodesFor(req);
+  res.set({
+    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'Content-Disposition': `attachment; filename="continuidad_${range.dateFrom}_a_${range.dateTo}.xlsx"`,
+    'Cache-Control': 'no-store',
+  });
+  try {
+    await ContinuationExportService.writeXlsx(res, { clientCodes, ...range });
+  } catch (err) {
+    // Los encabezados ya salieron: solo queda cortar la descarga (el navegador la marca como fallida).
+    logger.error('Exportación de continuidad falló', err);
+    res.destroy(err);
+  }
 });

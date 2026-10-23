@@ -24,6 +24,8 @@ router.get('/feedback', requireRole('supervisor_calidad', 'gestor_usuarios', 'au
 // mismos roles que Continuidad.
 router.get('/agents-weekly', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.getAgentWeekly);
 router.get('/agents-weekly/:agenteId/audits', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.listAgentWeekAudits);
+router.get('/continuations-export/count', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.countContinuationsExport);
+router.get('/continuations-export', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.exportContinuations);
 router.get('/continuations/:id', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.getContinuationAudit);
 router.get('/continuations/:id/audio', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.streamContinuationAudio);
 
