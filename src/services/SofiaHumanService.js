@@ -514,16 +514,23 @@ class SofiaHumanService {
    * entregado). Se puede volver a marcar (re-descarga), simplemente
    * actualiza la marca de tiempo.
    */
+  /**
+   * Registra la entrega del feedback. Solo la PRIMERA entrega cuenta: volver
+   * a descargar el PDF (otro auditor, o el mismo otro día) no sobrescribe
+   * quién ni cuándo se entregó — es lo que mide "Seguimiento de feedback".
+   */
   async markDelivered(botCallId, userId) {
-    const updated = await db('sofia_continuation_audits')
+    await db('sofia_continuation_audits')
       .where({ bot_call_id: botCallId, status: 'scored' })
+      .whereNull('delivered_at')
       .update({ delivered_by: userId, delivered_at: db.fn.now() });
-    if (!updated) {
+    const row = await db('sofia_continuation_audits').where({ bot_call_id: botCallId, status: 'scored' }).first();
+    if (!row) {
       const err = new Error('Continuación no encontrada o aún no calificada');
       err.statusCode = 404;
       throw err;
     }
-    return db('sofia_continuation_audits').where({ bot_call_id: botCallId }).first();
+    return row;
   }
 
   /**
@@ -574,6 +581,8 @@ class SofiaHumanService {
    * y a qué agentes, en un rango de fechas de ENTREGA (delivered_at, no la
    * fecha de la llamada — se monitorea el trabajo del auditor). Devuelve un
    * resumen por auditor y el detalle de cada entrega, sin transcripción.
+   * Incluye con 0 entregas a los auditor_ia activos de esas campañas que no
+   * entregaron nada en el rango — justo los que más interesa ver.
    */
   async getFeedbackMonitor({ clientCodes, dateFrom, dateTo }) {
     const rows = await db('sofia_continuation_audits as sca')
@@ -607,18 +616,27 @@ class SofiaHumanService {
       a.sumaPuntaje += Number(r.score) || 0;
     }
 
-    const auditores = [...byAuditor.values()]
-      .map(({ agentes, sumaPuntaje, ...a }) => ({
-        ...a,
-        agentes: agentes.size,
-        promedio_puntaje: Math.round((sumaPuntaje / a.feedbacks) * 10) / 10,
-      }))
-      .sort((a, b) => b.feedbacks - a.feedbacks);
+    const conEntregas = [...byAuditor.values()].map(({ agentes, sumaPuntaje, ...a }) => ({
+      ...a,
+      agentes: agentes.size,
+      promedio_puntaje: Math.round((sumaPuntaje / a.feedbacks) * 10) / 10,
+    }));
+
+    const sinEntregas = (await db('users')
+      .where({ role: 'auditor_ia', active: true })
+      .whereRaw('JSON_OVERLAPS(client_codes, ?)', [JSON.stringify(clientCodes)])
+      .select('id', db.raw('COALESCE(name, username) as nombre')))
+      .filter((u) => !byAuditor.has(u.id))
+      .map((u) => ({ auditor_id: u.id, auditor_nombre: u.nombre, feedbacks: 0, agentes: 0, promedio_puntaje: null, ultimo: null }));
+
+    const auditores = [...conEntregas, ...sinEntregas]
+      .sort((a, b) => b.feedbacks - a.feedbacks || a.auditor_nombre.localeCompare(b.auditor_nombre, 'es'));
 
     return {
       resumen: {
         feedbacks: rows.length,
-        auditores: auditores.length,
+        auditores: conEntregas.length,
+        auditores_sin_feedback: sinEntregas.length,
         agentes: new Set(rows.map((r) => r.agente_id)).size,
       },
       auditores,
