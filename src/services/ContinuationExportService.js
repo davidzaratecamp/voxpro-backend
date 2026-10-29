@@ -78,6 +78,7 @@ class ContinuationExportService {
       { header: 'Fecha', key: 'fecha', width: 12, style: { numFmt: 'dd/mm/yyyy' } },
       { header: 'Hora', key: 'hora', width: 10 },
       { header: 'Duración', key: 'duracion', width: 10, style: { numFmt: '[m]:ss' } },
+      { header: 'Teléfono llamada', key: 'telefono', width: 15 },
       { header: 'Tipificación del agente', key: 'tipificacion', width: 26 },
       { header: 'Transcripción (Agente / Cliente)', key: 't0', width: 110 },
       ...Array.from({ length: EXTRA_COLS }, (_, i) => ({ header: 'Transcripción (cont.)', key: `t${i + 1}`, width: 60 })),
@@ -85,7 +86,7 @@ class ContinuationExportService {
 
     const header = ws.getRow(1);
     styleHeader(header);
-    ws.autoFilter = { from: 'A1', to: 'F1' };
+    ws.autoFilter = { from: 'A1', to: 'G1' };
     header.commit();
 
     const top = { vertical: 'top' };
@@ -94,7 +95,7 @@ class ContinuationExportService {
       .orderBy('hora', 'asc')
       .select(
         'agente_nombre', 'agente_id', db.raw("DATE_FORMAT(fecha, '%Y-%m-%d') as fecha"), 'hora', 'duracion',
-        'nomenclatura_nombre', 'nomenclatura_id', 'transcription',
+        'telefono', 'nomenclatura_nombre', 'nomenclatura_id', 'transcription',
       );
 
     let total = 0;
@@ -106,10 +107,11 @@ class ContinuationExportService {
         fecha: toExcelDate(r.fecha),
         hora: r.hora ? String(r.hora).slice(0, 8) : '',
         duracion: r.duracion != null ? r.duracion / 86400 : null,
+        telefono: r.telefono || '',
         tipificacion: r.nomenclatura_nombre || r.nomenclatura_id || '',
         ...Object.fromEntries(parts.map((p, i) => [`t${i}`, p])),
       });
-      row.eachCell((cell, col) => { cell.alignment = col >= 7 ? { ...top, wrapText: true } : top; });
+      row.eachCell((cell, col) => { cell.alignment = col >= 8 ? { ...top, wrapText: true } : top; });
       row.commit();
       total++;
     }
