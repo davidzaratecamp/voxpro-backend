@@ -26,7 +26,7 @@ exports.requireGestor = requireGestor;
 
 exports.list = asyncHandler(async (req, res) => {
   const users = await db('users')
-    .select('id', 'username', 'name', 'role', 'client_codes', 'active', 'voicebot_read_only', 'created_at')
+    .select('id', 'username', 'name', 'role', 'client_codes', 'active', 'voicebot_read_only', 'feedback_monitor', 'created_at')
     .orderBy('name');
 
   const parsed = users.map((u) => ({
@@ -38,7 +38,7 @@ exports.list = asyncHandler(async (req, res) => {
 });
 
 exports.create = asyncHandler(async (req, res) => {
-  const { username, password, name, role, client_codes, active, voicebot_read_only } = req.body;
+  const { username, password, name, role, client_codes, active, voicebot_read_only, feedback_monitor } = req.body;
 
   if (!username || !password || !name || !role) {
     return res.status(400).json({ error: true, message: 'username, password, name y role son requeridos' });
@@ -68,6 +68,7 @@ exports.create = asyncHandler(async (req, res) => {
     client_codes: JSON.stringify(client_codes),
     active: active !== false,
     voicebot_read_only: !!voicebot_read_only,
+    feedback_monitor: !!feedback_monitor,
   });
 
   res.status(201).json({ message: 'Usuario creado', data: { id } });
@@ -75,7 +76,7 @@ exports.create = asyncHandler(async (req, res) => {
 
 exports.update = asyncHandler(async (req, res) => {
   const { id } = req.params;
-  const { password, name, role, client_codes, active, voicebot_read_only } = req.body;
+  const { password, name, role, client_codes, active, voicebot_read_only, feedback_monitor } = req.body;
 
   const user = await db('users').where('id', id).first();
   if (!user) return res.status(404).json({ error: true, message: 'Usuario no encontrado' });
@@ -99,6 +100,7 @@ exports.update = asyncHandler(async (req, res) => {
   if (client_codes) updates.client_codes = JSON.stringify(client_codes);
   if (active !== undefined) updates.active = active;
   if (voicebot_read_only !== undefined) updates.voicebot_read_only = !!voicebot_read_only;
+  if (feedback_monitor !== undefined) updates.feedback_monitor = !!feedback_monitor;
   if (password)     updates.password_hash = await bcrypt.hash(password, 10);
 
   await db('users').where('id', id).update(updates);

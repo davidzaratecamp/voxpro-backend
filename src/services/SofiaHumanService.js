@@ -570,6 +570,63 @@ class SofiaHumanService {
   }
 
   /**
+   * "Seguimiento de feedback": qué auditores han entregado feedback, cuántos
+   * y a qué agentes, en un rango de fechas de ENTREGA (delivered_at, no la
+   * fecha de la llamada — se monitorea el trabajo del auditor). Devuelve un
+   * resumen por auditor y el detalle de cada entrega, sin transcripción.
+   */
+  async getFeedbackMonitor({ clientCodes, dateFrom, dateTo }) {
+    const rows = await db('sofia_continuation_audits as sca')
+      .leftJoin('users as u', 'u.id', 'sca.delivered_by')
+      .whereIn('sca.client_code', clientCodes)
+      .whereNotNull('sca.delivered_at')
+      .whereRaw('DATE(sca.delivered_at) BETWEEN ? AND ?', [dateFrom, dateTo])
+      .orderBy('sca.delivered_at', 'desc')
+      .select(
+        'sca.id', 'sca.client_code', 'sca.agente_id', 'sca.agente_nombre', 'sca.telefono',
+        db.raw("DATE_FORMAT(sca.fecha, '%Y-%m-%d') as fecha"), 'sca.hora', 'sca.score', 'sca.high_impact_failed',
+        'sca.delivered_by', db.raw('COALESCE(u.name, u.username) as auditor_nombre'),
+        db.raw("DATE_FORMAT(sca.delivered_at, '%Y-%m-%d %H:%i:%s') as delivered_at"),
+      );
+
+    const byAuditor = new Map();
+    for (const r of rows) {
+      if (!byAuditor.has(r.delivered_by)) {
+        byAuditor.set(r.delivered_by, {
+          auditor_id: r.delivered_by,
+          auditor_nombre: r.auditor_nombre || `Usuario ${r.delivered_by}`,
+          feedbacks: 0,
+          agentes: new Set(),
+          sumaPuntaje: 0,
+          ultimo: r.delivered_at, // rows vienen ordenadas por delivered_at desc
+        });
+      }
+      const a = byAuditor.get(r.delivered_by);
+      a.feedbacks++;
+      a.agentes.add(r.agente_id);
+      a.sumaPuntaje += Number(r.score) || 0;
+    }
+
+    const auditores = [...byAuditor.values()]
+      .map(({ agentes, sumaPuntaje, ...a }) => ({
+        ...a,
+        agentes: agentes.size,
+        promedio_puntaje: Math.round((sumaPuntaje / a.feedbacks) * 10) / 10,
+      }))
+      .sort((a, b) => b.feedbacks - a.feedbacks);
+
+    return {
+      resumen: {
+        feedbacks: rows.length,
+        auditores: auditores.length,
+        agentes: new Set(rows.map((r) => r.agente_id)).size,
+      },
+      auditores,
+      detalle: rows.map((r) => ({ ...r, high_impact_failed: !!r.high_impact_failed })),
+    };
+  }
+
+  /**
    * "Calificación de agentes": una fila por agente con su promedio de la
    * semana (lunes a domingo) sobre las continuaciones ya calificadas por la
    * IA, más el promedio de la semana anterior para ver si sube o baja.

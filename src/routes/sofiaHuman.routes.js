@@ -19,6 +19,11 @@ router.get('/commercial-stats', requireRole('supervisor_calidad', 'gestor_usuari
 // cuentas auditor_ia — mismo motivo que commercial-stats arriba.
 router.get('/feedback', requireRole('supervisor_calidad', 'gestor_usuarios', 'auditor_ia'), ctrl.getFeedback);
 
+// "Seguimiento de feedback": qué auditores entregaron feedback, cuántos y a
+// quién — gestor_usuarios o usuarios con el permiso feedback_monitor (sin
+// importar su rol), por eso no usa requireRole.
+router.get('/feedback-monitor', ctrl.requireFeedbackMonitor, ctrl.getFeedbackMonitor);
+
 // "Calificación de agentes": promedio semanal por agente sobre las
 // continuaciones calificadas por la IA y el detalle de cada auditoría —
 // mismos roles que Continuidad.

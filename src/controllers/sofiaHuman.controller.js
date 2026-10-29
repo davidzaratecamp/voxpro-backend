@@ -7,6 +7,7 @@ const asyncHandler = require('../middleware/asyncHandler');
 const SofiaHumanService = require('../services/SofiaHumanService');
 const ContinuationExportService = require('../services/ContinuationExportService');
 const logger = require('../utils/logger');
+const db = require('../database/connection');
 const voicebotSource = require('../config/voicebotSource');
 const { downloadBuffer } = require('./RealtimeScanService');
 const { resolveAllowedClientCodes, CLIENT_CODES } = require('../utils/sofiaHumanAccess');
@@ -251,6 +252,27 @@ exports.listAgentWeekAudits = asyncHandler(async (req, res) => {
   res.json({ data, count: data.length });
 });
 
+/**
+ * Acceso a "Seguimiento de feedback": gestor_usuarios o quien tenga el
+ * permiso feedback_monitor. Se lee de la base (no del JWT) para que dar o
+ * quitar el permiso aplique al instante, sin volver a iniciar sesión.
+ */
+exports.requireFeedbackMonitor = asyncHandler(async (req, res, next) => {
+  if (req.user?.role === 'gestor_usuarios') return next();
+  const row = await db('users').where({ id: req.user.id, active: true }).select('feedback_monitor').first();
+  if (!row?.feedback_monitor) {
+    return res.status(403).json({ error: true, message: 'No tienes permiso para monitorear el feedback' });
+  }
+  next();
+});
+
+// GET /api/sofia-human/feedback-monitor?date_from=&date_to=&client_code=
+// date_from/date_to = fechas en que se ENTREGÓ el feedback.
+exports.getFeedbackMonitor = asyncHandler(async (req, res) => {
+  const data = await SofiaHumanService.getFeedbackMonitor({ clientCodes: clientCodesFor(req), ...parseExportRange(req, 92) });
+  res.json({ data });
+});
+
 // GET /api/sofia-human/agents-weekly/export?week=&client_code=
 exports.exportAgentWeekly = asyncHandler(async (req, res) => {
   const weekStart = parseWeek(req);
@@ -288,15 +310,15 @@ exports.streamContinuationAudio = asyncHandler(async (req, res) => {
 
 const EXPORT_MAX_DAYS = 31;
 
-/** date_from/date_to obligatorios (YYYY-MM-DD), con un máximo de EXPORT_MAX_DAYS días. */
-function parseExportRange(req) {
+/** date_from/date_to obligatorios (YYYY-MM-DD), con un máximo de `maxDays` días. */
+function parseExportRange(req, maxDays = EXPORT_MAX_DAYS) {
   const { date_from: from, date_to: to } = req.query;
   const valid = (s) => /^\d{4}-\d{2}-\d{2}$/.test(s || '') && !Number.isNaN(new Date(`${s}T00:00:00Z`).getTime());
   const fail = (message) => { const err = new Error(message); err.statusCode = 400; throw err; };
   if (!valid(from) || !valid(to)) fail('Se requieren date_from y date_to (YYYY-MM-DD)');
   const days = (new Date(`${to}T00:00:00Z`) - new Date(`${from}T00:00:00Z`)) / 86400000;
   if (days < 0) fail('La fecha inicial es posterior a la final');
-  if (days >= EXPORT_MAX_DAYS) fail(`El rango máximo es de ${EXPORT_MAX_DAYS} días`);
+  if (days >= maxDays) fail(`El rango máximo es de ${maxDays} días`);
   return { dateFrom: from, dateTo: to };
 }
 
