@@ -251,6 +251,24 @@ exports.listAgentWeekAudits = asyncHandler(async (req, res) => {
   res.json({ data, count: data.length });
 });
 
+// GET /api/sofia-human/agents-weekly/export?week=&client_code=
+exports.exportAgentWeekly = asyncHandler(async (req, res) => {
+  const weekStart = parseWeek(req);
+  const clientCodes = clientCodesFor(req);
+  res.set({
+    'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    'Content-Disposition': `attachment; filename="calificacion_agentes_${weekStart}.xlsx"`,
+    'Cache-Control': 'no-store',
+  });
+  try {
+    await ContinuationExportService.writeAgentWeeklyXlsx(res, { clientCodes, weekStart });
+  } catch (err) {
+    if (!res.headersSent) throw err;
+    logger.error('Exportación de calificación de agentes falló', err);
+    res.destroy(err);
+  }
+});
+
 // GET /api/sofia-human/continuations/:id
 exports.getContinuationAudit = asyncHandler(async (req, res) => {
   const data = await SofiaHumanService.getContinuationAudit(Number(req.params.id));
