@@ -27,6 +27,7 @@ const CODE_TO_GROUP = {
   claro_tyt_outbound: 'tyt',
   obama_vital: 'tyt',
   obama_vital_bienvenida: 'tyt',
+  obama_vital_ventas: 'tyt',
   obama_vital_customer: 'tyt',
 };
 

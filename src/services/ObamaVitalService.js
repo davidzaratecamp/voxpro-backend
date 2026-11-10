@@ -80,7 +80,11 @@ function callsSql(where) {
         -- no registrados que sí fueron conversación.
         AND (cu.disposition = 'ANSWERED' OR cu.registro_llamada_id IS NOT NULL)
         AND cu.billsec > 0 AND COALESCE(cu.audiofile, '') <> ''
-        AND cu.context IN ('racodialer-asistido', 'aware-cola-inbound')
+        -- El marcador "outbound" (Ventas 1 casi completo, parte de Bienvenida)
+        -- solo si quedó en registro_llamada: sin registro son tramos del
+        -- Blaster o del cliente, sin agente.
+        AND (cu.context IN ('racodialer-asistido', 'aware-cola-inbound')
+             OR (cu.context = 'racodialer-outbound' AND cu.registro_llamada_id IS NOT NULL))
       -- Una misma llamada puede tener 2 filas (una ligada a registro_llamada
       -- y otra no): se prefiere la registrada.
       ORDER BY cu.uniqueid, (cu.registro_llamada_id IS NOT NULL) DESC, cu.id DESC

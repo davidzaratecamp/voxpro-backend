@@ -24,10 +24,17 @@ module.exports = {
       label: 'Bienvenida',
       proyectos: { 10: 'Bienvenida 1', 11: 'Bienvenida 2' },
     },
+    // Nuevos Estados se califica con la matriz de Ventas.
+    ventas: {
+      key: 'obama_vital_ventas',
+      label: 'Ventas',
+      proyectos: { 12: 'Ventas 1', 13: 'Ventas 2', 19: 'Nuevos Estados' },
+    },
+    // 1 In Retorno Blaster (entrante, cola 3020) se califica con la de ObamaCus.
     customer: {
       key: 'obama_vital_customer',
       label: 'ObamaCus',
-      proyectos: { 2: 'ObamaCus1', 4: 'ObamaCus2', 5: 'ObamaCus3', 6: 'ObamaCus4' },
+      proyectos: { 2: 'ObamaCus1', 4: 'ObamaCus2', 5: 'ObamaCus3', 6: 'ObamaCus4', 20: '1 In Retorno Blaster' },
     },
   },
 };
