@@ -251,7 +251,7 @@ exports.streamAudio = asyncHandler(async (req, res) => {
   const sftp = new SFTPService();
   const tmpDir = os.tmpdir();
   const tmpInput = path.join(tmpDir, `voxpro_in_${Date.now()}.wav`);
-  const tmpOutput = path.join(tmpDir, `voxpro_out_${Date.now()}.wav`);
+  const tmpOutput = path.join(tmpDir, `voxpro_out_${Date.now()}.mp3`);
 
   try {
     // Archivos locales (Avaya) vs Zoom (API auth) vs HTTP (tiempo real) vs remotos (SFTP)
@@ -303,20 +303,23 @@ exports.streamAudio = asyncHandler(async (req, res) => {
       await sftp.disconnect();
       fs.writeFileSync(tmpInput, audioBuffer);
     }
+    // MP3 mono 32 kbps: una llamada de 20 min pesa ~5 MB. En WAV PCM eran
+    // ~38 MB y con conexiones lentas no alcanzaba a llegar al navegador.
     await execFileAsync('ffmpeg', [
       '-y', '-i', tmpInput,
-      '-acodec', 'pcm_s16le',
+      '-acodec', 'libmp3lame',
       '-ar', '16000',
       '-ac', '1',
+      '-b:a', '32k',
       tmpOutput,
     ]);
 
     const converted = fs.readFileSync(tmpOutput);
 
     res.set({
-      'Content-Type': 'audio/wav',
+      'Content-Type': 'audio/mpeg',
       'Content-Length': converted.length,
-      'Content-Disposition': `inline; filename="${selection.file_name}"`,
+      'Content-Disposition': `inline; filename="${path.parse(selection.file_name).name}.mp3"`,
       'Cache-Control': 'no-store',
     });
     res.send(converted);
