@@ -24,6 +24,9 @@ router.use('/ia-consumo', auth, require('./iaConsumo.routes'));
 // Analítica de solo lectura para Prisma (token de servicio propio, sin JWT).
 router.use('/prisma-analytics', require('./prismaAnalytics.routes'));
 
+// Usuarios activos de Aware para el Gestor Técnico (token de servicio propio, sin JWT).
+router.use('/gestor', require('./gestorAware.routes'));
+
 // Health check
 router.get('/health', (req, res) => {
   res.json({ status: 'ok', timestamp: new Date().toISOString() });
